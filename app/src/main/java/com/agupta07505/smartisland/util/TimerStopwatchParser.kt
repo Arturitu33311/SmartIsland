@@ -51,6 +51,12 @@ object TimerStopwatchParser {
         "stopwatch running", "stopwatch paused"
     )
 
+    /** Words that also mean other things (a laptop's name, a split payment): they need more than themselves. */
+    private val LOOSE_STOPWATCH_WORDS = setOf("lap", "laps", "split", "elapsed")
+
+    private fun hasWord(text: String, word: String): Boolean =
+        Regex("(?<![\\p{L}\\p{N}])" + Regex.escape(word) + "(?![\\p{L}\\p{N}])").containsMatchIn(text)
+
     private val TIME_PATTERN = Pattern.compile("\\b(?:(\\d{1,2}):)?(\\d{1,2}):(\\d{2})(?:\\.(\\d{1,2}))?\\b")
 
     fun extractFullText(notification: Notification): String {
@@ -237,8 +243,13 @@ object TimerStopwatchParser {
         }
 
         val isClockApp = CLOCK_PACKAGES.contains(packageName) || packageName.contains("clock") || packageName.contains("stopwatch")
-        val hasLapAction = actionLabels.any { it.contains("lap") || it.contains("split") }
-        val hasStopwatchKeyword = STOPWATCH_KEYWORDS.any { fullText.contains(it) }
+        // Whole words only: "Alan-Lap" (a laptop's name) is not a stopwatch lap. The loose words need a
+        // clock app or a time in the text to count.
+        val hasTimeInText = TIME_PATTERN.matcher(fullText).find()
+        val hasLapAction = actionLabels.any { hasWord(it, "lap") || hasWord(it, "split") }
+        val hasStopwatchKeyword = STOPWATCH_KEYWORDS.any { kw ->
+            hasWord(fullText, kw) && (kw !in LOOSE_STOPWATCH_WORDS || isClockApp || hasTimeInText)
+        }
 
         val extras = notification.extras
         val isChronometer = extras?.let {
