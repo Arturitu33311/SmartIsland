@@ -35,6 +35,9 @@ class AutostartReceiver : BroadcastReceiver() {
                 action != Intent.ACTION_USER_PRESENT
             ) return@runCatchingLogged
 
+            // Coucou's reminders: an alarm does not survive a restart or an update.
+            com.agupta07505.smartisland.coucou.ReminderScheduler.rearm(context)
+
             val pendingResult = goAsync()
             CoroutineScope(Dispatchers.IO).launch {
                 try {

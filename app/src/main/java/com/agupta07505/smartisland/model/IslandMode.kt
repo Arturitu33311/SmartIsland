@@ -21,5 +21,7 @@ enum class IslandMode {
     Flashlight,
     ScreenRecording,
     Timer,
-    Stopwatch
+    Stopwatch,
+    /** Coucou: a task's reminder has gone off. */
+    Reminder
 }

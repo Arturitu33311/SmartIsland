@@ -305,6 +305,15 @@ class SmartIslandNotificationRepository : INotificationRepository {
                     IslandNotificationAction("Reset", null)
                 )
             )
+            IslandMode.Reminder -> IslandNotification(
+                key = "demo_reminder",
+                packageName = "com.agupta07505.smartisland",
+                appName = "Coucou",
+                title = "Llamar a mamá",
+                text = "Reminder",
+                timeMillis = System.currentTimeMillis(),
+                mode = IslandMode.Reminder
+            )
             IslandMode.Empty -> null
         }
         if (demoNotification != null) {

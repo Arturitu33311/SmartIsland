@@ -52,6 +52,21 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".coucou.CoucouTasksActivity"
+            android:exported="true"
+            android:label="Coucou tasks"
+            android:theme="@style/Theme.SmartIsland">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <receiver
+            android:name=".coucou.ReminderReceiver"
+            android:exported="false" />
+
         <service
             android:name=".service.SmartIslandOverlayService"
             android:exported="true"

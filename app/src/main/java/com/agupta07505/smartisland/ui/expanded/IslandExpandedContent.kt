@@ -176,6 +176,7 @@ fun IslandExpandedContent(
                 IslandMode.ScreenRecording -> height.coerceIn(72.dp, 130.dp)
                 IslandMode.Timer -> height.coerceIn(72.dp, 130.dp)
                 IslandMode.Stopwatch -> height.coerceIn(72.dp, 130.dp)
+                IslandMode.Reminder -> height.coerceIn(105.dp, 150.dp)
                 else -> height.coerceIn(80.dp, 160.dp)
             }
         }
@@ -322,6 +323,11 @@ fun IslandExpandedContent(
                                 onCollapse = onCollapse,
                                 settings = settings
                             )
+                            IslandMode.Reminder -> com.agupta07505.smartisland.coucou.ui.ReminderExpanded(
+                                notification = notification,
+                                bottomPadding = bottomPadding,
+                                onCollapse = onCollapse
+                            )
                             IslandMode.Stopwatch -> StopwatchExpanded(
                                 notification = notification,
                                 bottomPadding = bottomPadding,
@@ -463,6 +469,7 @@ private fun NotificationBackdrop(
         IslandMode.ScreenRecording -> Color(settings.screenRecordingColor)
         IslandMode.Timer -> Color(settings.timerColor)
         IslandMode.Stopwatch -> Color(settings.stopwatchColor)
+        IslandMode.Reminder -> com.agupta07505.smartisland.coucou.ui.ReminderAmber
         else -> Color(settings.notificationDotColor)
     }
 
