@@ -15,6 +15,7 @@ import com.agupta07505.smartisland.coucou.phone.PhoneSettings.jinxSync
 import com.agupta07505.smartisland.coucou.phone.PhoneSettings.showDesk
 import com.agupta07505.smartisland.coucou.ui.DeskState
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.distinctUntilChanged
 import com.agupta07505.smartisland.coucou.phone.SshPendientes
 import com.agupta07505.smartisland.coucou.phone.SyncOutcome
@@ -44,6 +45,7 @@ object CoucouRuntime {
     private var agentsWatch: Job? = null
     private var jinxLoop: Job? = null
     private var deskJob: Job? = null
+    private var deskWatch: Job? = null
     private val kicks = Channel<Unit>(Channel.CONFLATED)
 
     private val _jinx = MutableStateFlow(SyncOutcome(emptyList(), emptyList()))
@@ -71,6 +73,18 @@ object CoucouRuntime {
             }
         } else {
             IslandDesk.publish(app, CoucouTasks.state.value, _jinx.value.fromJinx.count { it.source != "teams" })
+        }
+
+        // ...and if anything takes him off the island, he is put back.
+        if (deskWatch == null) {
+            deskWatch = scope.launch {
+                SmartIslandRepositories.notificationRepository(app).notifications
+                    .map { list -> list.any { it.key == IslandDesk.KEY } }
+                    .distinctUntilChanged()
+                    .collect { present ->
+                        if (!present && app.showDesk) IslandDesk.publish(app, CoucouTasks.state.value, _jinx.value.fromJinx.count { it.source != "teams" })
+                    }
+            }
         }
 
         // Claude Code on the laptop
@@ -199,7 +213,7 @@ object IslandAgents {
 
 /** Mochi in the island: one notification that is always there, and says how many things are open. */
 object IslandDesk {
-    private const val KEY = "coucou_desk"
+    const val KEY = "coucou_desk"
 
     fun publish(context: Context, tasks: List<CoucouTask>, jinxOpen: Int) {
         val repo = SmartIslandRepositories.notificationRepository(context)

@@ -13,6 +13,7 @@ import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Shader
 import com.agupta07505.smartisland.model.IslandMode
+import com.agupta07505.smartisland.model.isCoucou
 import com.agupta07505.smartisland.model.IslandNotification
 import com.agupta07505.smartisland.model.IslandNotificationAction
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -65,10 +66,10 @@ class SmartIslandNotificationRepository : INotificationRepository {
     }
 
     override fun removeNotificationsForPackage(packageName: String) {
-        val matching = _notifications.value.filter { it.packageName == packageName && it.mode != IslandMode.Music }
+        val matching = _notifications.value.filter { it.packageName == packageName && it.mode != IslandMode.Music && !it.mode.isCoucou }
         if (matching.isEmpty()) return
         _notifications.update { list ->
-            list.filterNot { it.packageName == packageName && it.mode != IslandMode.Music }
+            list.filterNot { it.packageName == packageName && it.mode != IslandMode.Music && !it.mode.isCoucou }
         }
         for (notif in matching) {
             _commands.tryEmit(SmartIslandCommand.CancelNotification(notif.key))

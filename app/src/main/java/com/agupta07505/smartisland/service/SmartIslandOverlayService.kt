@@ -39,6 +39,7 @@ import com.agupta07505.smartisland.data.INotificationRepository
 import com.agupta07505.smartisland.data.SmartIslandCommand
 import com.agupta07505.smartisland.data.SmartIslandSettings
 import com.agupta07505.smartisland.data.SmartIslandSettingsRepository
+import com.agupta07505.smartisland.model.isCoucou
 import com.agupta07505.smartisland.model.IslandNotification
 import com.agupta07505.smartisland.ui.IslandViewModel
 import com.agupta07505.smartisland.ui.OverlayIsland
@@ -776,6 +777,22 @@ class SmartIslandOverlayService : AccessibilityService() {
     }
 
     private fun openNotification(notification: IslandNotification) {
+        // Coucou's own cards belong to Coucou: Mochi and a reminder open the task list; a permission or a
+        // question is answered where it is. None of them launches Smart Island's own screen.
+        if (notification.mode.isCoucou) {
+            runCatchingLogged(TAG, "Failed to open Coucou's tasks") {
+                if (notification.mode == com.agupta07505.smartisland.model.IslandMode.Desk ||
+                    notification.mode == com.agupta07505.smartisland.model.IslandMode.Reminder
+                ) {
+                    startActivity(
+                        Intent(this, com.agupta07505.smartisland.coucou.CoucouTasksActivity::class.java)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                    viewModel.collapse()
+                }
+            }
+            return
+        }
         if (notification.contentIntent != null) {
             sendIntentWithOptions(this, notification.contentIntent)
         } else {

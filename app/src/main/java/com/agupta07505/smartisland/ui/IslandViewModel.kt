@@ -16,6 +16,8 @@ import com.agupta07505.smartisland.data.SmartIslandSettings
 import com.agupta07505.smartisland.data.SmartIslandSettingsRepository
 import com.agupta07505.smartisland.model.IslandMode
 import com.agupta07505.smartisland.model.IslandNotification
+import com.agupta07505.smartisland.model.WAITING_PRIORITY
+import com.agupta07505.smartisland.model.priority
 import com.agupta07505.smartisland.util.runSuspendCatchingLogged
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -47,12 +49,7 @@ class IslandViewModel(
         notifications,
         foregroundPackage,
         settings
-    ) { list, fgPkg, s ->
-        list.filterNot { notif ->
-            (!s.enableBatteryMode && notif.mode == IslandMode.Battery) ||
-            (!fgPkg.isNullOrEmpty() && notif.mode == IslandMode.Music && notif.packageName == fgPkg)
-        }
-    }.stateIn(
+    ) { list, fgPkg, s -> arrange(list, fgPkg, s) }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.Eagerly,
         initialValue = emptyList()
@@ -71,34 +68,76 @@ class IslandViewModel(
         initialValue = IslandMode.Empty
     )
 
+    /** The selection follows the notification, not its place: the order changes as things come and go. */
+    private var selectedKey: String? = null
+
+    /** Someone chose this one (a swipe, a tap, an event that took the front): it stays until it goes away or the island folds. */
+    private var pinned = false
+    private var unpinJob: Job? = null
+
+    /** A pin is a few seconds of attention, not a lease: if nobody uses the island, it goes back to the most important one. */
+    private fun pin(key: String) {
+        selectedKey = key
+        pinned = true
+        unpinJob?.cancel()
+        unpinJob = viewModelScope.launch {
+            delay(PIN_MS)
+            if (!expanded.value) restOnTop()
+        }
+    }
+
+    private fun restOnTop() {
+        unpinJob?.cancel()
+        pinned = false
+        selectedKey = visibleNotifications.value.firstOrNull()?.key
+        selectedIndex.value = 0
+    }
+
+    private fun arrange(list: List<IslandNotification>, fgPkg: String?, s: SmartIslandSettings): List<IslandNotification> =
+        list.filterNot { notif ->
+            (!s.enableBatteryMode && notif.mode == IslandMode.Battery) ||
+            (!fgPkg.isNullOrEmpty() && notif.mode == IslandMode.Music && notif.packageName == fgPkg)
+        }.sortedWith(compareByDescending<IslandNotification> { it.mode.priority }.thenByDescending { it.timeMillis })
+
+    /**
+     * A new event takes the front, as it always did, except over the person typing or over something that
+     * waits for them (a call, a permission, a question, a reminder) and matters more than it does.
+     */
+    private fun mayTakeFront(incoming: IslandNotification): Boolean {
+        val current = visibleNotifications.value.getOrNull(selectedIndex.value) ?: return true
+        if (current.key == incoming.key) return true
+        if (isInputActive.value) return false
+        return !(current.mode.priority >= WAITING_PRIORITY && incoming.mode.priority < current.mode.priority)
+    }
+
     private var autoCollapseJob: Job? = null
 
     init {
         viewModelScope.launch {
             runSuspendCatchingLogged(TAG, "Notifications collector failed") {
                 visibleNotifications.collect { list ->
-                    selectedIndex.update { currentSelected ->
-                        currentSelected.coerceIn(0, (list.size - 1).coerceAtLeast(0))
-                    }
+                    // While someone is using the island (or chose this one) stay on it; otherwise, and when it is
+                    // gone, rest on the most important thing there is.
+                    val keep = pinned || expanded.value
+                    val kept = if (keep) selectedKey?.let { k -> list.indexOfFirst { it.key == k } } ?: -1 else -1
+                    if (kept < 0) pinned = false
+                    selectedIndex.value = if (kept >= 0) kept else 0
+                    selectedKey = list.getOrNull(selectedIndex.value)?.key
                 }
             }
         }
         viewModelScope.launch {
             runSuspendCatchingLogged(TAG, "Auto-expand collector failed") {
                 notificationRepo.autoExpandEvent.collect { key ->
-                    val notif = notifications.value.firstOrNull { it.key == key } ?: return@collect
-                    val isFgMusic = notif.mode == IslandMode.Music &&
-                        !foregroundPackage.value.isNullOrEmpty() &&
-                        notif.packageName == foregroundPackage.value
-                    if (isFgMusic) return@collect
-
-                    val index = notifications.value.indexOfFirst { it.key == key }
-                    if (index >= 0) {
-                        selectedIndex.value = index
-                        val isDemo = key.startsWith("demo_")
-                        if (settings.value.autoExpandOnNotification || isDemo) {
-                            expand()
-                        }
+                    // Hidden ones (battery off, the music of the app on screen) are not in the arranged list.
+                    val arranged = arrange(notifications.value, foregroundPackage.value, settings.value)
+                    val index = arranged.indexOfFirst { it.key == key }
+                    if (index < 0 || !mayTakeFront(arranged[index])) return@collect
+                    pin(key)
+                    selectedIndex.value = index
+                    val isDemo = key.startsWith("demo_")
+                    if (settings.value.autoExpandOnNotification || isDemo) {
+                        expand()
                     }
                 }
             }
@@ -120,6 +159,8 @@ class IslandViewModel(
                     } else {
                         stopAutoCollapseTimer()
                         isInputActive.value = false
+                        // Folded: the island goes back to resting on the most important thing it holds.
+                        restOnTop()
                     }
                 }
             }
@@ -191,6 +232,7 @@ class IslandViewModel(
     fun setSelectedNotificationIndex(index: Int) {
         val list = visibleNotifications.value
         if (index in list.indices) {
+            pin(list[index].key)
             selectedIndex.value = index
             resetAutoCollapseTimer()
         }
@@ -201,8 +243,11 @@ class IslandViewModel(
         val index = selectedIndex.value
         if (index in list.indices) {
             val notification = list[index]
-            notificationRepo.removeNotification(notification.key)
-            notificationRepo.sendCommand(SmartIslandCommand.CancelNotification(notification.key))
+            // Mochi is not dismissed: he is where the island rests.
+            if (notification.mode != IslandMode.Desk) {
+                notificationRepo.removeNotification(notification.key)
+                notificationRepo.sendCommand(SmartIslandCommand.CancelNotification(notification.key))
+            }
         }
         collapse()
     }
@@ -210,15 +255,17 @@ class IslandViewModel(
     fun dismissAllNotifications() {
         val list = visibleNotifications.value
         for (notification in list) {
+            if (notification.mode == IslandMode.Desk) continue
             notificationRepo.sendCommand(SmartIslandCommand.CancelNotification(notification.key))
+            notificationRepo.removeNotification(notification.key)
         }
-        notificationRepo.removeAllNotifications()
         collapse()
     }
 
     companion object {
         private const val TAG = "IslandViewModel"
         private const val AUTO_COLLAPSE_DELAY_MS = 5000L
+        private const val PIN_MS = 8000L
 
         fun provideFactory(
             settingsRepo: SmartIslandSettingsRepository,
