@@ -326,6 +326,10 @@ class SmartIslandNotificationRepository : INotificationRepository {
                 key = "demo_question", packageName = "com.agupta07505.smartisland", appName = "Claude Code",
                 title = "¿Qué hago?", text = "coucou", timeMillis = System.currentTimeMillis(), mode = IslandMode.Question
             )
+            IslandMode.Desk -> IslandNotification(
+                key = "demo_desk", packageName = "com.agupta07505.smartisland", appName = "Coucou",
+                title = "3 to do", text = "Mochi", timeMillis = System.currentTimeMillis(), mode = IslandMode.Desk, progress = 3
+            )
             IslandMode.Empty -> null
         }
         if (demoNotification != null) {

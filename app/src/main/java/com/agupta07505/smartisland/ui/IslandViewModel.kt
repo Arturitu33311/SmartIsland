@@ -164,8 +164,15 @@ class IslandViewModel(
     private fun startAutoCollapseTimer() {
         autoCollapseJob?.cancel()
         if (isInputActive.value) return
+        // Coucou: what waits for an answer (a permission, a question) stays open until it is answered or
+        // expires; Mochi's desk and a reminder get time to be used. Everything else folds after 5 s as before.
+        val waitMs = when (visibleNotifications.value.getOrNull(selectedIndex.value)?.mode) {
+            IslandMode.Approval, IslandMode.Question -> 115_000L
+            IslandMode.Desk, IslandMode.Reminder -> 25_000L
+            else -> AUTO_COLLAPSE_DELAY_MS
+        }
         autoCollapseJob = viewModelScope.launch {
-            delay(AUTO_COLLAPSE_DELAY_MS)
+            delay(waitMs)
             collapse()
         }
     }

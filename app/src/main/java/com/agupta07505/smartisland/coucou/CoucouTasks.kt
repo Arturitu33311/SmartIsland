@@ -9,6 +9,7 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import com.agupta07505.smartisland.coucou.phone.PhoneSettings.jinxSync
 import com.agupta07505.smartisland.di.SmartIslandRepositories
 import com.agupta07505.smartisland.model.IslandMode
 import com.agupta07505.smartisland.model.IslandNotification
@@ -18,6 +19,16 @@ import java.util.UUID
 /** What the screens and the island's buttons do with the tasks. Every change re-arms the alarm. */
 object CoucouTasks {
     private const val KEY_PREFIX = "coucou_reminder_"
+
+    private val _state = kotlinx.coroutines.flow.MutableStateFlow<List<CoucouTask>>(emptyList())
+
+    /** The tasks as they are now (the island's desk and the task screen watch this). */
+    val state: kotlinx.coroutines.flow.StateFlow<List<CoucouTask>> = _state
+
+    /** Reads the file again (after a sync, a reminder, or at start). */
+    fun refresh(context: Context) {
+        _state.value = list(context)
+    }
 
     fun islandKey(taskId: String) = KEY_PREFIX + taskId
     fun taskIdOf(islandKey: String) = islandKey.removePrefix(KEY_PREFIX)
@@ -33,14 +44,18 @@ object CoucouTasks {
 
     fun list(context: Context) = TaskStore.of(context).load()
 
-    /** Adds a task; the sentence may carry its own time ("llamar a mamá a las 17:30"). */
-    fun add(context: Context, text: String, jinx: Boolean = false): List<CoucouTask> {
+    /**
+     * Adds a task; the sentence may carry its own time ("llamar a mamá a las 17:30"). With the sync on,
+     * a new task is also Jinx's (its chip can keep it only here).
+     */
+    fun add(context: Context, text: String, jinx: Boolean = context.jinxSync): List<CoucouTask> {
         val parsed = TaskParser.parseWhen(text, nowSec(), ::offset)
         val list = TaskStore.of(context).update {
             TaskLogic.add(it, parsed.title, parsed.whenSec, nowSec(), UUID.randomUUID().toString(), jinx)
         }
         ReminderScheduler.rearm(context)
         changed(context)
+        _state.value = list
         return list
     }
 
@@ -49,6 +64,7 @@ object CoucouTasks {
         withdraw(context, id)
         ReminderScheduler.rearm(context)
         changed(context)
+        _state.value = list
         return list
     }
 
@@ -56,6 +72,7 @@ object CoucouTasks {
         val list = TaskStore.of(context).update { TaskLogic.snooze(it, id, nowSec() + seconds) }
         withdraw(context, id)
         ReminderScheduler.rearm(context)
+        _state.value = list
         return list
     }
 
@@ -66,6 +83,7 @@ object CoucouTasks {
         withdraw(context, id)
         ReminderScheduler.rearm(context)
         changed(context)
+        _state.value = list
         return list
     }
 
@@ -130,6 +148,7 @@ object ReminderScheduler {
             )
         }
         rearm(context)
+        CoucouTasks.refresh(context)
     }
 }
 
@@ -137,4 +156,9 @@ class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         ReminderScheduler.fire(context)
     }
+}
+
+/** A tap on one of Coucou's cards: the island stays open a little longer. */
+fun touchIsland(context: Context) {
+    SmartIslandRepositories.notificationRepository(context).resetTimer()
 }

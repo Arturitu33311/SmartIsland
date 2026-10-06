@@ -12,6 +12,10 @@ import com.agupta07505.smartisland.coucou.phone.JinxSync
 import com.agupta07505.smartisland.coucou.phone.PhoneSettings
 import com.agupta07505.smartisland.coucou.phone.PhoneSettings.followClaude
 import com.agupta07505.smartisland.coucou.phone.PhoneSettings.jinxSync
+import com.agupta07505.smartisland.coucou.phone.PhoneSettings.showDesk
+import com.agupta07505.smartisland.coucou.ui.DeskState
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import com.agupta07505.smartisland.coucou.phone.SshPendientes
 import com.agupta07505.smartisland.coucou.phone.SyncOutcome
 import com.agupta07505.smartisland.di.SmartIslandRepositories
@@ -39,6 +43,7 @@ object CoucouRuntime {
     private var agents: AgentRemote? = null
     private var agentsWatch: Job? = null
     private var jinxLoop: Job? = null
+    private var deskJob: Job? = null
     private val kicks = Channel<Unit>(Channel.CONFLATED)
 
     private val _jinx = MutableStateFlow(SyncOutcome(emptyList(), emptyList()))
@@ -55,6 +60,18 @@ object CoucouRuntime {
     fun apply(context: Context) {
         val app = context.applicationContext
         ReminderScheduler.rearm(app)
+        CoucouTasks.refresh(app)
+
+        // Mochi, always in the island with the tasks
+        if (deskJob == null) {
+            deskJob = scope.launch {
+                combine(CoucouTasks.state, _jinx) { tasks, j -> tasks to j.fromJinx.count { it.source != "teams" } }
+                    .distinctUntilChanged()
+                    .collect { (tasks, theirs) -> IslandDesk.publish(app, tasks, theirs) }
+            }
+        } else {
+            IslandDesk.publish(app, CoucouTasks.state.value, _jinx.value.fromJinx.count { it.source != "teams" })
+        }
 
         // Claude Code on the laptop
         if (app.followClaude && agents == null) {
@@ -114,6 +131,7 @@ object CoucouRuntime {
             return
         }
         _jinx.value = JinxSync.run(SshPendientes(app, profile), TaskStore.of(app), System.currentTimeMillis() / 1000, DismissQueue.of(app))
+        CoucouTasks.refresh(app)
     }
 }
 
@@ -177,4 +195,42 @@ object IslandAgents {
         repo.notifications.value.filter { it.key == KEY_AGENT || it.key.startsWith("coucou_approval_") || it.key.startsWith("coucou_question_") }
             .forEach { repo.removeNotification(it.key) }
     }
+}
+
+/** Mochi in the island: one notification that is always there, and says how many things are open. */
+object IslandDesk {
+    private const val KEY = "coucou_desk"
+
+    fun publish(context: Context, tasks: List<CoucouTask>, jinxOpen: Int) {
+        val repo = SmartIslandRepositories.notificationRepository(context)
+        if (!context.showDesk) {
+            repo.removeNotification(KEY)
+            return
+        }
+        val now = System.currentTimeMillis() / 1000
+        val open = tasks.filter { !it.done }
+        val count = open.size + (if (context.jinxSyncOn()) jinxOpen else 0)
+        val overdue = open.any { it.remindAt != null && it.remindAt <= now }
+        repo.postNotification(
+            IslandNotification(
+                key = KEY,
+                packageName = context.packageName,
+                appName = "Coucou",
+                title = if (count == 0) "All clear" else "$count to do",
+                text = "Mochi",
+                // The oldest of all: whatever else happens takes the front.
+                timeMillis = 1L,
+                mode = IslandMode.Desk,
+                progress = count,
+                category = when {
+                    overdue -> DeskState.OVERDUE
+                    count == 0 -> DeskState.CLEAR
+                    else -> null
+                },
+            ),
+            autoExpand = false,
+        )
+    }
+
+    private fun Context.jinxSyncOn(): Boolean = with(PhoneSettings) { this@jinxSyncOn.jinxSync }
 }

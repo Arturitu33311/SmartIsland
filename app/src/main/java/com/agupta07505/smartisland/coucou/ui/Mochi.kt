@@ -26,7 +26,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
-enum class MochiMood { Idle, Alert, Happy, Listening }
+enum class MochiMood { Idle, Alert, Happy, Listening, Sleepy }
 
 /** Coucou's coral: what Mochi wears when he has nothing in particular to say. */
 val MochiCoral = Color(0xFFE08A6C)
@@ -91,6 +91,11 @@ fun MochiGlyph(
         val lean = if (mood == MochiMood.Listening) w * 0.04f else 0f
         for (cx in listOf(w * 0.32f + lean, w * 0.68f + lean)) {
             when (mood) {
+                MochiMood.Sleepy -> {
+                    // closed eyes: a short line each
+                    val r = w * 0.07f
+                    drawLine(ink, Offset(cx - r, eyeY + r * 0.2f), Offset(cx + r, eyeY + r * 0.2f), strokeWidth = w * 0.05f, cap = StrokeCap.Round)
+                }
                 MochiMood.Happy -> {
                     // ^ ^ : a small arc for each eye
                     val r = w * 0.085f

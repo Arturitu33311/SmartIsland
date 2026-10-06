@@ -66,10 +66,13 @@ class ConfirmActivity : Activity() {
         /** Can the phone ask for a fingerprint or the screen lock at all? */
         fun available(context: Context): Boolean {
             if (Build.VERSION.SDK_INT < 30) return false
-            val bm = context.getSystemService(BiometricManager::class.java) ?: return false
-            val ok = bm.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL)
-            return ok == BiometricManager.BIOMETRIC_SUCCESS ||
-                (context.getSystemService(KeyguardManager::class.java)?.isDeviceSecure == true)
+            // Asking must never be able to take the island down: whatever goes wrong, there is nothing to ask with.
+            return runCatching {
+                val bm = context.getSystemService(BiometricManager::class.java) ?: return@runCatching false
+                val ok = bm.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+                ok == BiometricManager.BIOMETRIC_SUCCESS ||
+                    (context.getSystemService(KeyguardManager::class.java)?.isDeviceSecure == true)
+            }.getOrDefault(false)
         }
 
         /** Asks; [then] is called with whether it was confirmed. */

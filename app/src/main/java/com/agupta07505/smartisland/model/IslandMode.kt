@@ -29,5 +29,7 @@ enum class IslandMode {
     /** Coucou: Claude Code asks for permission. */
     Approval,
     /** Coucou: Claude Code asks a question. */
-    Question
+    Question,
+    /** Coucou: Mochi, always there, with the tasks (it opens on his desk). */
+    Desk
 }

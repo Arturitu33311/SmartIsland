@@ -114,7 +114,7 @@ private fun TasksScreen() {
             onValueChange = { input = it },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
-            placeholder = { Text("llamar a mamá a las 17:30 · stretch in 20 min · mañana 9:00") },
+            placeholder = { Text("llamar a mamá a las 17:30 · en 20 min", maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { add() }),
         )
@@ -155,30 +155,6 @@ private fun TasksScreen() {
                     }
                     IconButton(onClick = { tasks = CoucouTasks.delete(context, t.id) }) {
                         Icon(Icons.Rounded.Close, "Delete", tint = Color.White.copy(alpha = 0.5f))
-                    }
-                }
-            }
-            if (jinxOn && outcome.fromJinx.isNotEmpty()) {
-                item {
-                    Text("From Jinx", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp, modifier = Modifier.padding(top = 14.dp, bottom = 4.dp))
-                }
-                items(outcome.fromJinx, key = { "jinx-" + it.id }) { r ->
-                    Row(Modifier.fillMaxWidth().padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(r.titulo, color = Color.White, fontSize = 15.sp)
-                            r.due?.let { Text(it, color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp) }
-                        }
-                        // The school's assignments are mirrored by Jinx's own job: closing them here would be undone.
-                        if (r.source == "teams") {
-                            Text("Teams", color = Color.White.copy(alpha = 0.4f), fontSize = 11.sp)
-                        } else {
-                            IconButton(onClick = { CoucouRuntime.resolveJinx(context, r.id, "hecho") }) {
-                                Icon(Icons.Rounded.Check, "Done", tint = Color(0xFF4ADE80))
-                            }
-                            IconButton(onClick = { CoucouRuntime.resolveJinx(context, r.id, "descartado") }) {
-                                Icon(Icons.Rounded.Close, "Dismiss", tint = Color.White.copy(alpha = 0.5f))
-                            }
-                        }
                     }
                 }
             }

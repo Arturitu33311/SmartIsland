@@ -37,6 +37,11 @@ object PhoneSettings {
         get() = prefs(this).getBoolean("jinxSync", false)
         set(v) = prefs(this).edit().putBoolean("jinxSync", v).apply()
 
+    /** Keep Mochi in the island, with the tasks (on by default). */
+    var Context.showDesk: Boolean
+        get() = prefs(this).getBoolean("showDesk", true)
+        set(v) = prefs(this).edit().putBoolean("showDesk", v).apply()
+
     /** Follow Claude Code on the laptop and answer its requests (over the laptop profile). */
     var Context.followClaude: Boolean
         get() = prefs(this).getBoolean("followClaude", false)

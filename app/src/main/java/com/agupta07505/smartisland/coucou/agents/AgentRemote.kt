@@ -104,13 +104,13 @@ class AgentRemote(private val context: Context, private val scope: CoroutineScop
     /** Reads lines until the link ends or goes quiet; writes what the phone has to say. Returns why it ended. */
     private suspend fun pump(stream: Ssh.Stream): String {
         val reader = BufferedReader(InputStreamReader(stream.input, Charsets.UTF_8))
-        val lines = LinkedBlockingQueue<String?>()
+        // The end of the link is told by the thread ending (a queue cannot hold a null).
+        val lines = LinkedBlockingQueue<String>()
         val readerThread = Thread {
             try {
                 while (true) lines.put(reader.readLine() ?: break)
             } catch (_: Exception) {
             }
-            lines.put(null)
         }.apply { isDaemon = true; start() }
         var lastPing = 0L
         try {

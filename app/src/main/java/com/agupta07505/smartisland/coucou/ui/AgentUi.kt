@@ -21,10 +21,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.QuestionMark
@@ -53,6 +51,7 @@ import com.agupta07505.smartisland.coucou.IslandAgents
 import com.agupta07505.smartisland.coucou.agents.ConfirmActivity
 import com.agupta07505.smartisland.coucou.agents.Pending
 import com.agupta07505.smartisland.coucou.agents.RemoteProtocol
+import com.agupta07505.smartisland.coucou.touchIsland
 import com.agupta07505.smartisland.coucou.agents.SessionState
 import com.agupta07505.smartisland.model.IslandNotification
 
@@ -217,6 +216,7 @@ fun QuestionExpanded(notification: IslandNotification?, bottomPadding: Dp, onCol
     var picked by remember(notification?.key, index) { mutableStateOf<List<String>>(emptyList()) }
     var message by remember(notification?.key) { mutableStateOf<String?>(null) }
     val q = questions.getOrNull(index)
+    val context = LocalContext.current
 
     fun finish(all: Map<String, List<String>>) {
         val req = p ?: return
@@ -226,14 +226,14 @@ fun QuestionExpanded(notification: IslandNotification?, bottomPadding: Dp, onCol
 
     fun next(chosen: List<String>) {
         val cur = q ?: return
+        touchIsland(context)
         val all = answers.value + (cur.question to chosen)
         answers.value = all
         if (index + 1 < questions.size) index += 1 else finish(all)
     }
 
     Column(
-        Modifier.fillMaxSize().padding(horizontal = 18.dp).padding(top = 6.dp, bottom = bottomPadding),
-        verticalArrangement = Arrangement.Center,
+        Modifier.fillMaxWidth().padding(horizontal = 18.dp).padding(top = 8.dp, bottom = bottomPadding.coerceAtLeast(10.dp)),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             MochiGlyph(28.dp, QuestionBlue, MochiMood.Alert)
@@ -246,14 +246,15 @@ fun QuestionExpanded(notification: IslandNotification?, bottomPadding: Dp, onCol
             if (questions.size > 1) Text("${index + 1}/${questions.size}", color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
         }
         Spacer(Modifier.size(6.dp))
-        Column(Modifier.verticalScroll(rememberScrollState()).weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            for (o in q?.options.orEmpty()) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            for (o in q?.options.orEmpty().take(6)) {
                 val on = o.label in picked
                 Pill(
                     o.label + if (o.description.isNotEmpty()) "  ·  ${o.description}" else "",
                     Modifier.fillMaxWidth(),
                     if (on) Green else QuestionBlue,
                 ) {
+                    touchIsland(context)
                     if (q?.multi == true) picked = if (on) picked - o.label else picked + o.label else next(listOf(o.label))
                 }
             }

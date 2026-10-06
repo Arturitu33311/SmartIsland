@@ -52,6 +52,7 @@ import com.agupta07505.smartisland.coucou.CoucouRuntime
 import com.agupta07505.smartisland.coucou.agents.AgentUi
 import com.agupta07505.smartisland.coucou.phone.PhoneSettings.followClaude
 import com.agupta07505.smartisland.coucou.phone.PhoneSettings.jinxSync
+import com.agupta07505.smartisland.coucou.phone.PhoneSettings.showDesk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -96,6 +97,16 @@ private fun Setup() {
                 "Use the computers' Tailscale names or addresses.",
             color = Color.White.copy(alpha = 0.65f), fontSize = 13.sp,
         )
+
+        Card("Mochi in the island") {
+            var desk by remember { mutableStateOf(context.showDesk) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(checked = desk, onCheckedChange = { desk = it; context.showDesk = it; CoucouRuntime.apply(context) })
+                Spacer(Modifier.width(10.dp))
+                Text("Keep Mochi in the island, with my tasks", color = Color.White, fontSize = 14.sp)
+            }
+            Text("A small Mochi that is always there: asleep when nothing is open, looking up when something is overdue. Open the island to see the tasks and add one.", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
+        }
 
         Card("1 · The phone's key") {
             val line = publicLine

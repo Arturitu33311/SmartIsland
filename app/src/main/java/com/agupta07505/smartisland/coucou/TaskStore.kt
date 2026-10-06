@@ -45,7 +45,8 @@ class TaskStore(private val file: File) {
                     .put("created", t.created)
                     .put("completedAt", t.completedAt ?: JSONObject.NULL)
                     .put("jinx", t.jinx)
-                    .put("jinxId", t.jinxId ?: JSONObject.NULL),
+                    .put("jinxId", t.jinxId ?: JSONObject.NULL)
+                    .put("origin", t.origin ?: JSONObject.NULL),
             )
         }.toString()
 
@@ -63,6 +64,7 @@ class TaskStore(private val file: File) {
                     completedAt = if (o.isNull("completedAt")) null else o.getLong("completedAt"),
                     jinx = o.optBoolean("jinx"),
                     jinxId = if (o.isNull("jinxId")) null else o.getString("jinxId"),
+                    origin = if (o.isNull("origin")) null else o.optString("origin").takeIf { it.isNotEmpty() },
                 )
             }
         }

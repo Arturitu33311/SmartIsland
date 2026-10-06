@@ -1066,6 +1066,7 @@ private fun SecondaryBubbleContent(
             StopwatchCollapsedGlyph(notification = notification, settings = settings)
         }
         IslandMode.Reminder -> com.agupta07505.smartisland.coucou.ui.ReminderCollapsedGlyph()
+        IslandMode.Desk -> com.agupta07505.smartisland.coucou.ui.DeskCollapsedGlyph(notification)
         IslandMode.Agent, IslandMode.Approval, IslandMode.Question -> com.agupta07505.smartisland.coucou.ui.AgentCollapsedGlyph(notification)
         IslandMode.Notification, IslandMode.DownloadUpload, IslandMode.Empty -> {
             NotificationGlyph(notification = notification, settings = settings)
@@ -1169,10 +1170,11 @@ internal fun defaultEstimatedHeightForMode(mode: IslandMode?): Dp {
         IslandMode.Bluetooth, IslandMode.Flashlight, IslandMode.ScreenRecording,
         IslandMode.Timer, IslandMode.Stopwatch -> 115.dp
         IslandMode.Reminder -> 125.dp
+        IslandMode.Desk -> 280.dp
         IslandMode.Agent -> 130.dp
         IslandMode.Approval -> 175.dp
         IslandMode.Question -> 210.dp
-        IslandMode.Empty, null -> 135.dp
+        IslandMode.Empty, null -> 280.dp
     }
 }
 

@@ -94,13 +94,20 @@ class JinxSyncTest {
     }
 
     @Test
-    fun what_jinx_was_told_appears_and_what_is_ours_does_not_repeat() {
+    fun what_jinx_made_becomes_a_task_of_ours_and_what_is_ours_does_not_repeat() {
         val s = store()
         val j = FakeJinx(mutableListOf(JinxRow("h1", "pagar la renta", "2026-10-07", "admin", "hook", "pendiente")))
         s.addShared("mía")
         val out = JinxSync.run(j, s, now)
-        assertEquals(listOf("h1"), out.fromJinx.map { it.id })
-        assertEquals(listOf("pagar la renta"), out.fromJinx.map { it.titulo })
+        assertTrue(out.fromJinx.isEmpty())
+        val mine = out.tasks.single { it.jinxId == "h1" }
+        assertEquals("pagar la renta", mine.title)
+        assertEquals("hook", mine.origin)
+        assertEquals(2, out.tasks.size)
+        // Marking it done here closes it there, like any other.
+        s.update { TaskLogic.setDone(it, mine.id, true, now) }
+        JinxSync.run(j, s, now)
+        assertEquals("hecho", j.rows.first { it.id == "h1" }.status)
     }
 
     @Test

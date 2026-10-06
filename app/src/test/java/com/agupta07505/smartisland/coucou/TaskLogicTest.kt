@@ -107,4 +107,50 @@ class TaskLogicTest {
         assertEquals("2026-10-06", TaskLogic.civilDate(20_732))
         assertEquals("1969-12-31", TaskLogic.civilDate(-1))
     }
+
+    private val day = 86_400L
+
+    private fun pend(id: String, source: String, due: String?, status: String = "pendiente") =
+        JinxRow(id, "pend $id", due, null, source, status)
+
+    @Test
+    fun a_day_becomes_nine_in_the_morning_in_this_zone() {
+        assertEquals(0L, TaskLogic.daysFromCivil(1970, 1, 1))
+        assertEquals(11_016L, TaskLogic.daysFromCivil(2000, 2, 29))
+        assertEquals(20_732L, TaskLogic.daysFromCivil(2026, 10, 6))
+        assertEquals(-1L, TaskLogic.daysFromCivil(1969, 12, 31))
+        assertEquals(20_732 * day + 9 * 3600, TaskLogic.dueReminder("2026-10-06") { 0L })
+        assertEquals(20_732 * day + 15 * 3600, TaskLogic.dueReminder("2026-10-06") { -6 * 3600L })
+        for (bad in listOf("mañana", "2026-13-01", "2026-10-00", "2026/10/06", "", "2026-10-061")) assertNull(bad, TaskLogic.dueReminder(bad) { 0L })
+    }
+
+    @Test
+    fun what_jinx_made_becomes_ordinary_tasks_with_a_mark() {
+        val today = 20_732 * day + 10 * 3600
+        val rows = listOf(
+            pend("a", "hook", "2026-10-08"),
+            pend("b", "teams", "2026-10-06"),
+            pend("c", "portal", null),
+            pend("d", "coucou", null),
+            pend("e", "hook", null, "hecho"),
+        )
+        val (l, taken) = TaskLogic.importUnlinked(emptyList(), rows, today) { 0L }
+        assertEquals(4, taken)
+        fun by(id: String) = l.single { it.jinxId == id }
+        assertEquals(Triple(20_734 * day + 9 * 3600, false, "hook"), Triple(by("a").remindAt, by("a").notified, by("a").origin))
+        assertEquals(Triple(20_732 * day + 9 * 3600, true, "teams"), Triple(by("b").remindAt, by("b").notified, by("b").origin))
+        assertEquals(null to "portal", by("c").remindAt to by("c").origin)
+        assertNull(by("d").origin)
+        assertTrue(l.all { it.jinx && !it.done })
+        // Taken in once; the next sync leaves them alone.
+        assertEquals(0, TaskLogic.importUnlinked(l, rows, today) { 0L }.second)
+        TaskLogic.reconcile(l, rows, today).second.let { assertTrue(it.toResolve.isEmpty() && it.toAdd.isEmpty()) }
+    }
+
+    @Test
+    fun nothing_is_taken_in_beyond_the_limit() {
+        var l = emptyList<CoucouTask>()
+        for (i in 0 until TaskLogic.MAX_TASKS) l = TaskLogic.add(l, "t$i", null, now, "id$i")
+        assertEquals(0, TaskLogic.importUnlinked(l, listOf(pend("z", "hook", null)), now) { 0L }.second)
+    }
 }

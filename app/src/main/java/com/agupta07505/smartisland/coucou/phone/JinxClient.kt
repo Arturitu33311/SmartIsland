@@ -114,7 +114,10 @@ object JinxSync {
      * over what is hers to have, close what was closed here, and return what is left of hers. What
      * cannot be done now is asked again at the next round, because the difference is still there.
      */
-    fun run(api: PendientesApi, store: TaskStore, now: Long, queue: DismissQueue? = null): SyncOutcome {
+    fun run(
+        api: PendientesApi, store: TaskStore, now: Long, queue: DismissQueue? = null,
+        offset: (Long) -> Long = { t -> java.util.TimeZone.getDefault().getOffset(t * 1000) / 1000L },
+    ): SyncOutcome {
         var rows = try {
             api.list()
         } catch (e: Exception) {
@@ -157,6 +160,8 @@ object JinxSync {
         }
         // What was just changed is read again, so a closed pendiente does not flash back.
         if (wrote) rows = runCatching { api.list() }.getOrDefault(rows)
+        // Hers become ours: the same kind of task, with the same actions, marked with who made them.
+        store.update { TaskLogic.importUnlinked(it, rows, now, offset).first }
         val list = store.load()
         return SyncOutcome(list, TaskLogic.unlinkedOpen(list, rows), error)
     }
