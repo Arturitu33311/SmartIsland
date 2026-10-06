@@ -177,6 +177,9 @@ fun IslandExpandedContent(
                 IslandMode.Timer -> height.coerceIn(72.dp, 130.dp)
                 IslandMode.Stopwatch -> height.coerceIn(72.dp, 130.dp)
                 IslandMode.Reminder -> height.coerceIn(105.dp, 150.dp)
+                IslandMode.Agent -> height.coerceIn(100.dp, 160.dp)
+                IslandMode.Approval -> height.coerceIn(150.dp, 210.dp)
+                IslandMode.Question -> height.coerceIn(150.dp, 280.dp)
                 else -> height.coerceIn(80.dp, 160.dp)
             }
         }
@@ -323,6 +326,9 @@ fun IslandExpandedContent(
                                 onCollapse = onCollapse,
                                 settings = settings
                             )
+                            IslandMode.Agent -> com.agupta07505.smartisland.coucou.ui.AgentExpanded(bottomPadding = bottomPadding)
+                            IslandMode.Approval -> com.agupta07505.smartisland.coucou.ui.ApprovalExpanded(notification = notification, bottomPadding = bottomPadding, onCollapse = onCollapse)
+                            IslandMode.Question -> com.agupta07505.smartisland.coucou.ui.QuestionExpanded(notification = notification, bottomPadding = bottomPadding, onCollapse = onCollapse)
                             IslandMode.Reminder -> com.agupta07505.smartisland.coucou.ui.ReminderExpanded(
                                 notification = notification,
                                 bottomPadding = bottomPadding,
@@ -469,7 +475,9 @@ private fun NotificationBackdrop(
         IslandMode.ScreenRecording -> Color(settings.screenRecordingColor)
         IslandMode.Timer -> Color(settings.timerColor)
         IslandMode.Stopwatch -> Color(settings.stopwatchColor)
-        IslandMode.Reminder -> com.agupta07505.smartisland.coucou.ui.ReminderAmber
+        IslandMode.Reminder, IslandMode.Approval -> com.agupta07505.smartisland.coucou.ui.ReminderAmber
+        IslandMode.Agent -> com.agupta07505.smartisland.coucou.ui.ClaudeOrange
+        IslandMode.Question -> com.agupta07505.smartisland.coucou.ui.QuestionBlue
         else -> Color(settings.notificationDotColor)
     }
 

@@ -1,0 +1,180 @@
+/*
+ * Coucou for Android — part of this SmartIsland fork (GNU GPL v3).
+ */
+
+package com.agupta07505.smartisland.coucou
+
+import android.content.Context
+import com.agupta07505.smartisland.coucou.agents.AgentRemote
+import com.agupta07505.smartisland.coucou.agents.AgentUi
+import com.agupta07505.smartisland.coucou.agents.SessionState
+import com.agupta07505.smartisland.coucou.phone.JinxSync
+import com.agupta07505.smartisland.coucou.phone.PhoneSettings
+import com.agupta07505.smartisland.coucou.phone.PhoneSettings.followClaude
+import com.agupta07505.smartisland.coucou.phone.PhoneSettings.jinxSync
+import com.agupta07505.smartisland.coucou.phone.SshPendientes
+import com.agupta07505.smartisland.coucou.phone.SyncOutcome
+import com.agupta07505.smartisland.di.SmartIslandRepositories
+import com.agupta07505.smartisland.model.IslandMode
+import com.agupta07505.smartisland.model.IslandNotification
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+
+/**
+ * What runs for as long as the island does: the sync with Jinx's pendientes and the link to Claude
+ * Code on the laptop, each only if it was turned on and paired. Started by the overlay service (and
+ * by the screens, which only need it to be there); safe to start twice.
+ */
+object CoucouRuntime {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var agents: AgentRemote? = null
+    private var agentsWatch: Job? = null
+    private var jinxLoop: Job? = null
+    private val kicks = Channel<Unit>(Channel.CONFLATED)
+
+    private val _jinx = MutableStateFlow(SyncOutcome(emptyList(), emptyList()))
+    val jinx: StateFlow<SyncOutcome> = _jinx.asStateFlow()
+
+    private val _agentUi = MutableStateFlow(AgentUi())
+    val agentUi: StateFlow<AgentUi> = _agentUi.asStateFlow()
+
+    /** Sends a line to the laptop (an answer to a request on screen). False if there is no link. */
+    fun sendToLaptop(line: String): Boolean = agents?.send(line) ?: false
+
+    /** Starts (or stops) each part according to the switches. Called at start and when a switch changes. */
+    @Synchronized
+    fun apply(context: Context) {
+        val app = context.applicationContext
+        ReminderScheduler.rearm(app)
+
+        // Claude Code on the laptop
+        if (app.followClaude && agents == null) {
+            val a = AgentRemote(app, scope)
+            agents = a
+            a.start()
+            agentsWatch = scope.launch {
+                var posted = emptySet<String>()
+                a.ui.collect { ui ->
+                    _agentUi.value = ui
+                    posted = IslandAgents.publish(app, ui, posted)
+                }
+            }
+        } else if (!app.followClaude && agents != null) {
+            agents?.stop()
+            agentsWatch?.cancel()
+            IslandAgents.clear(app)
+            agents = null
+            _agentUi.value = AgentUi()
+        }
+
+        // Jinx's pendientes
+        if (app.jinxSync && jinxLoop?.isActive != true) {
+            jinxLoop = scope.launch {
+                while (true) {
+                    runSync(app)
+                    // Every few minutes, or at once when something asks (a task changed, the screen opened).
+                    withTimeoutOrNull(5 * 60_000L) { kicks.receive() }
+                    delay(400)
+                }
+            }
+        } else if (!app.jinxSync && jinxLoop != null) {
+            jinxLoop?.cancel()
+            jinxLoop = null
+            _jinx.value = SyncOutcome(TaskStore.of(app).load(), emptyList())
+        }
+    }
+
+    /** Closes or dismisses one of Jinx's own pendientes, then looks at her list again. */
+    fun resolveJinx(context: Context, id: String, action: String) {
+        val app = context.applicationContext
+        scope.launch {
+            runCatching { SshPendientes(app, PhoneSettings.profile(app, PhoneSettings.SERVER)).resolve(id, action) }
+            runSync(app)
+        }
+    }
+
+    /** A task changed, or the screen opened: sync soon. */
+    fun kick() {
+        kicks.trySend(Unit)
+    }
+
+    private fun runSync(app: Context) {
+        val profile = PhoneSettings.profile(app, PhoneSettings.SERVER)
+        if (!profile.paired) {
+            _jinx.value = SyncOutcome(TaskStore.of(app).load(), emptyList(), "Pair the server in Coucou's phone settings")
+            return
+        }
+        _jinx.value = JinxSync.run(SshPendientes(app, profile), TaskStore.of(app), System.currentTimeMillis() / 1000, DismissQueue.of(app))
+    }
+}
+
+/** Puts what Claude Code is doing, and what it asks, on the island. */
+object IslandAgents {
+    private const val KEY_AGENT = "coucou_agent"
+    fun approvalKey(id: String) = "coucou_approval_$id"
+    fun questionKey(id: String) = "coucou_question_$id"
+    fun idOf(key: String) = key.substringAfter("coucou_approval_").substringAfter("coucou_question_")
+
+    /** Returns the keys now on the island, so the next call can take off what is gone. */
+    fun publish(context: Context, ui: AgentUi, before: Set<String>): Set<String> {
+        val repo = SmartIslandRepositories.notificationRepository(context)
+        val now = System.currentTimeMillis()
+        val keys = mutableSetOf<String>()
+
+        for (p in ui.pending) {
+            val key = if (p.isQuestion) questionKey(p.id) else approvalKey(p.id)
+            keys += key
+            if (key !in before) {
+                repo.postNotification(
+                    IslandNotification(
+                        key = key,
+                        packageName = context.packageName,
+                        appName = "Claude Code",
+                        title = if (p.isQuestion) (p.questions.firstOrNull()?.question ?: "Claude asks") else p.tool,
+                        text = if (p.isQuestion) p.project else p.detail,
+                        timeMillis = now,
+                        mode = if (p.isQuestion) IslandMode.Question else IslandMode.Approval,
+                    ),
+                    autoExpand = true,
+                )
+            }
+        }
+
+        // One line for the sessions: who is busy, and with what.
+        val busy = ui.sessions.filter { it.state != SessionState.Idle }
+        if (ui.status == AgentUi.Status.Connected && busy.isNotEmpty() && ui.pending.isEmpty()) {
+            val s = busy.first()
+            keys += KEY_AGENT
+            repo.postNotification(
+                IslandNotification(
+                    key = KEY_AGENT,
+                    packageName = context.packageName,
+                    appName = "Claude Code",
+                    title = (s.project.ifEmpty { "Claude Code" }) + if (busy.size > 1) "  +${busy.size - 1}" else "",
+                    text = listOf(s.tool, s.detail).filter { it.isNotEmpty() }.joinToString(" · ").ifEmpty { "working" },
+                    timeMillis = s.updatedAt,
+                    mode = IslandMode.Agent,
+                ),
+                autoExpand = false,
+            )
+        }
+
+        for (gone in before - keys) repo.removeNotification(gone)
+        return keys
+    }
+
+    fun clear(context: Context) {
+        val repo = SmartIslandRepositories.notificationRepository(context)
+        repo.notifications.value.filter { it.key == KEY_AGENT || it.key.startsWith("coucou_approval_") || it.key.startsWith("coucou_question_") }
+            .forEach { repo.removeNotification(it.key) }
+    }
+}

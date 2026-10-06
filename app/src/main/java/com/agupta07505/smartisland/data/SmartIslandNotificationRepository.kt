@@ -314,6 +314,18 @@ class SmartIslandNotificationRepository : INotificationRepository {
                 timeMillis = System.currentTimeMillis(),
                 mode = IslandMode.Reminder
             )
+            IslandMode.Agent -> IslandNotification(
+                key = "demo_agent", packageName = "com.agupta07505.smartisland", appName = "Claude Code",
+                title = "coucou", text = "Bash · cargo test --lib", timeMillis = System.currentTimeMillis(), mode = IslandMode.Agent
+            )
+            IslandMode.Approval -> IslandNotification(
+                key = "demo_approval", packageName = "com.agupta07505.smartisland", appName = "Claude Code",
+                title = "Bash", text = "rm -rf build/", timeMillis = System.currentTimeMillis(), mode = IslandMode.Approval
+            )
+            IslandMode.Question -> IslandNotification(
+                key = "demo_question", packageName = "com.agupta07505.smartisland", appName = "Claude Code",
+                title = "¿Qué hago?", text = "coucou", timeMillis = System.currentTimeMillis(), mode = IslandMode.Question
+            )
             IslandMode.Empty -> null
         }
         if (demoNotification != null) {

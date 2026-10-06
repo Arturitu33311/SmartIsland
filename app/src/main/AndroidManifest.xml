@@ -63,6 +63,18 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".coucou.agents.ConfirmActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <activity
+            android:name=".coucou.phone.PhoneSetupActivity"
+            android:exported="false"
+            android:label="Coucou phone link"
+            android:theme="@style/Theme.SmartIsland" />
+
         <receiver
             android:name=".coucou.ReminderReceiver"
             android:exported="false" />

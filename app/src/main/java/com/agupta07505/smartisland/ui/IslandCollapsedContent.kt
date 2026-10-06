@@ -218,6 +218,7 @@ fun IslandCollapsedContent(
                     StopwatchCollapsedGlyph(notification = notification, settings = settings)
                 }
                 IslandMode.Reminder -> com.agupta07505.smartisland.coucou.ui.ReminderCollapsedGlyph()
+                IslandMode.Agent, IslandMode.Approval, IslandMode.Question -> com.agupta07505.smartisland.coucou.ui.AgentCollapsedGlyph(notification)
                 IslandMode.Empty -> Unit
             }
         }
@@ -311,6 +312,7 @@ fun IslandCollapsedContent(
                     StopwatchTimer(notification = notification, color = Color(settings.stopwatchColor))
                 }
                 IslandMode.Reminder -> com.agupta07505.smartisland.coucou.ui.ReminderCollapsedRight()
+                IslandMode.Agent, IslandMode.Approval, IslandMode.Question -> com.agupta07505.smartisland.coucou.ui.AgentCollapsedRight(notification)
                 IslandMode.Empty -> Unit
             }
         }

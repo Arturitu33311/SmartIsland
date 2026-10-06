@@ -23,6 +23,12 @@ object CoucouTasks {
     fun taskIdOf(islandKey: String) = islandKey.removePrefix(KEY_PREFIX)
 
     private fun nowSec() = System.currentTimeMillis() / 1000
+
+    /** Something changed that Jinx should hear of (a no-op if the sync is off). */
+    private fun changed(context: Context) {
+        CoucouRuntime.apply(context)
+        CoucouRuntime.kick()
+    }
     private fun offset(t: Long) = TimeZone.getDefault().getOffset(t * 1000) / 1000L
 
     fun list(context: Context) = TaskStore.of(context).load()
@@ -34,6 +40,7 @@ object CoucouTasks {
             TaskLogic.add(it, parsed.title, parsed.whenSec, nowSec(), UUID.randomUUID().toString(), jinx)
         }
         ReminderScheduler.rearm(context)
+        changed(context)
         return list
     }
 
@@ -41,6 +48,7 @@ object CoucouTasks {
         val list = TaskStore.of(context).update { TaskLogic.setDone(it, id, done, nowSec()) }
         withdraw(context, id)
         ReminderScheduler.rearm(context)
+        changed(context)
         return list
     }
 
@@ -52,9 +60,12 @@ object CoucouTasks {
     }
 
     fun delete(context: Context, id: String): List<CoucouTask> {
+        // Her copy, if she has one, is dismissed at the next sync (even if she cannot be reached now).
+        TaskStore.of(context).load().firstOrNull { it.id == id }?.jinxId?.let { DismissQueue.of(context).add(it) }
         val list = TaskStore.of(context).update { TaskLogic.delete(it, id) }
         withdraw(context, id)
         ReminderScheduler.rearm(context)
+        changed(context)
         return list
     }
 

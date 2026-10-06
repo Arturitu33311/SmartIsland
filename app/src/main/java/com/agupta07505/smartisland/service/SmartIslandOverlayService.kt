@@ -329,6 +329,8 @@ class SmartIslandOverlayService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         isSystemConnected = true
+        // Coucou: Jinx's pendientes and Claude Code on the laptop, if they were turned on.
+        com.agupta07505.smartisland.coucou.CoucouRuntime.apply(applicationContext)
         if (destroyed || !::viewModel.isInitialized) return
         serviceScope.launch {
             runSuspendCatchingLogged(TAG, "Service reconnect failed") {

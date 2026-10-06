@@ -68,3 +68,32 @@ class TaskStore(private val file: File) {
         }
     }
 }
+
+/**
+ * Her pendientes to dismiss because the task was deleted here. A deleted task leaves no trace in the
+ * list, so what is owed to her is kept apart and emptied the next time she can be reached.
+ */
+class DismissQueue(private val file: File) {
+    @Synchronized
+    fun ids(): List<String> {
+        if (!file.exists()) return emptyList()
+        return runCatching { JSONArray(file.readText()).let { a -> (0 until a.length()).map { a.getString(it) } } }.getOrDefault(emptyList())
+    }
+
+    @Synchronized
+    private fun save(list: List<String>) {
+        val tmp = File(file.parentFile, file.name + ".tmp")
+        tmp.writeText(JSONArray(list).toString())
+        check(tmp.renameTo(file)) { "Could not save the queue" }
+    }
+
+    @Synchronized
+    fun add(id: String) = save((ids() + id).distinct())
+
+    @Synchronized
+    fun remove(id: String) = save(ids() - id)
+
+    companion object {
+        fun of(context: Context) = DismissQueue(File(context.applicationContext.filesDir, "coucou-jinx-dismiss.json"))
+    }
+}

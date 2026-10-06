@@ -93,6 +93,13 @@ android {
         )
     }
 
+    // The ssh libraries (BouncyCastle) bring the same licence files more than once.
+    packaging {
+        resources {
+            excludes += setOf("META-INF/LICENSE.md", "META-INF/LICENSE-notice.md", "META-INF/INDEX.LIST", "META-INF/DEPENDENCIES", "META-INF/versions/**")
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -134,6 +141,11 @@ dependencies {
     // Rikka Shizuku API
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
+    // Coucou: ssh (the phone talks to Jinx's server and to the laptop through restricted keys)
+    implementation("com.hierynomus:sshj:0.41.1")
+    implementation("org.bouncycastle:bcprov-jdk18on:1.86")
+    implementation("org.bouncycastle:bcpkix-jdk18on:1.86")
+    implementation("org.slf4j:slf4j-nop:2.0.17")
 
     debugImplementation(composeBom)
     debugImplementation("androidx.compose.ui:ui-tooling")

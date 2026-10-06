@@ -23,5 +23,11 @@ enum class IslandMode {
     Timer,
     Stopwatch,
     /** Coucou: a task's reminder has gone off. */
-    Reminder
+    Reminder,
+    /** Coucou: Claude Code is working on the laptop. */
+    Agent,
+    /** Coucou: Claude Code asks for permission. */
+    Approval,
+    /** Coucou: Claude Code asks a question. */
+    Question
 }
