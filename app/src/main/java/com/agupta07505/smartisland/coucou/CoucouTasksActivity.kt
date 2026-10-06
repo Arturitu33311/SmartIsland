@@ -142,23 +142,12 @@ private fun TasksScreen() {
                             )
                         }
                     }
-                    if (jinxOn && !t.done) {
-                        TextButton(onClick = {
-                            tasks = TaskStore.of(context).update { TaskLogic.setJinx(it, t.id, !t.jinx) }
-                            CoucouRuntime.kick()
-                        }) {
-                            Text(
-                                if (t.jinx) (if (t.jinxId != null) "Jinx ✓" else "Jinx …") else "Jinx",
-                                color = if (t.jinx) Color(0xFF39FF14) else Color.White.copy(alpha = 0.5f), fontSize = 12.sp,
-                            )
-                        }
-                    }
                     IconButton(onClick = { tasks = CoucouTasks.delete(context, t.id) }) {
                         Icon(Icons.Rounded.Close, "Delete", tint = Color.White.copy(alpha = 0.5f))
                     }
                 }
             }
-            outcome.error?.takeIf { jinxOn }?.let { e -> item { Text("Jinx: $e", color = Color(0xFFF5A524), fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp)) } }
+            outcome.error?.takeIf { jinxOn }?.let { e -> item { Text("Sync: $e", color = Color(0xFFF5A524), fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp)) } }
         }
     }
 }

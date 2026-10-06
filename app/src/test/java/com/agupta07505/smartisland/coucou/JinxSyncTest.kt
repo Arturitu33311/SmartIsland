@@ -136,15 +136,15 @@ class JinxSyncTest {
     }
 
     @Test
-    fun unsharing_dismisses_her_copy() {
+    fun every_task_is_shared_so_a_private_one_is_shared_again() {
         val s = store()
         val j = FakeJinx()
         s.addShared("a")
         JinxSync.run(j, s, now)
         s.update { TaskLogic.setJinx(it, "t-a", false) }
         JinxSync.run(j, s, now)
-        assertEquals("descartado", j.rows[0].status)
-        assertNull(s.load()[0].jinxId)
+        assertEquals("pendiente", j.rows[0].status)
+        assertTrue(s.load().single().jinx)
     }
 
     // ── The wire format ─────────────────────────────────────────────────────────

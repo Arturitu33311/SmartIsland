@@ -201,6 +201,5 @@ private fun TaskRow(t: CoucouTask, onDone: () -> Unit) {
             Text("⏰ ${time(it)}", color = if (late) ReminderAmber else Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
             Spacer(Modifier.width(4.dp))
         }
-        if (t.jinx) Box(Modifier.size(6.dp).clip(CircleShape).background(if (t.jinxId != null) JinxGreen else JinxGreen.copy(alpha = 0.35f)))
     }
 }

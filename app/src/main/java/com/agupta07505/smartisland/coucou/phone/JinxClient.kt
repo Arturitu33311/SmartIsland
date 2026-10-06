@@ -124,6 +124,8 @@ object JinxSync {
             return SyncOutcome(store.load(), emptyList(), e.message ?: "Jinx is not reachable")
         }
         var plan = com.agupta07505.smartisland.coucou.SyncPlan()
+        // One list on every device: every task is shared.
+        store.update { l -> l.map { if (it.jinx) it else it.copy(jinx = true) } }
         store.update { current ->
             val (next, p) = TaskLogic.reconcile(current, rows, now)
             plan = p
