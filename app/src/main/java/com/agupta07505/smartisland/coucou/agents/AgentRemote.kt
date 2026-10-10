@@ -5,6 +5,7 @@
 package com.agupta07505.smartisland.coucou.agents
 
 import android.content.Context
+import com.agupta07505.smartisland.coucou.CoucouTasks
 import com.agupta07505.smartisland.coucou.phone.PhoneSettings
 import com.agupta07505.smartisland.coucou.phone.Ssh
 import kotlinx.coroutines.CoroutineScope
@@ -45,6 +46,13 @@ class AgentRemote(private val context: Context, private val scope: CoroutineScop
     private val outbox = LinkedBlockingQueue<String>()
 
     @Volatile private var lastHeard = 0L
+
+    /** The task list changed here (or the link is new): tell the laptop at the next turn of the loop. */
+    @Volatile private var tasksDirty = true
+
+    fun requestTaskSync() {
+        tasksDirty = true
+    }
 
     fun start() {
         if (job?.isActive == true) return
@@ -113,9 +121,19 @@ class AgentRemote(private val context: Context, private val scope: CoroutineScop
             }
         }.apply { isDaemon = true; start() }
         var lastPing = 0L
+        var lastTasks = 0L
+        // A new link: the lists meet first thing, whatever either side did while they were apart.
+        tasksDirty = true
         try {
             while (currentCoroutineContext().isActive) {
                 val now = System.currentTimeMillis()
+                // Each device keeps its own tasks; when the link is there they are merged, newest change wins.
+                if (tasksDirty || now - lastTasks > 120_000) {
+                    tasksDirty = false
+                    lastTasks = now
+                    val line = RemoteProtocol.tasksSync(CoucouTasks.snapshotForLaptop(context))
+                    stream.output.write((line + "\n").toByteArray()); stream.output.flush()
+                }
                 // The laptop answers a ping at once: a long silence means the link is dead (a phone that
                 // changed network does not always find out by itself).
                 if (now - lastPing > 20_000) {
@@ -138,6 +156,7 @@ class AgentRemote(private val context: Context, private val scope: CoroutineScop
                     null -> Unit
                     RemoteMsg.Offline -> return "laptop-closed"
                     RemoteMsg.Disabled -> return "The phone link is off on the laptop (Settings → Phone)"
+                    is RemoteMsg.Tasks -> CoucouTasks.mergeFromLaptop(context, msg.json)
                     else -> {
                         model.apply(msg, lastHeard)
                         publish(AgentUi.Status.Connected)

@@ -30,10 +30,11 @@ class TaskLogicTest {
         assertTrue(!l[0].done && !l[0].notified)
         assertEquals(now + 600, l[0].remindAt)
         l = TaskLogic.setDone(l, "b", true, now)
-        l = TaskLogic.clearDone(l)
-        assertEquals(1, l.size)
-        l = TaskLogic.delete(l, "a")
-        assertTrue(l.isEmpty())
+        l = TaskLogic.clearDone(l, now + 8)
+        assertEquals(1, TaskLogic.visible(l).size)
+        assertTrue("a cleared one is a tombstone", l.any { it.id == "b" && it.deleted && it.updatedAt == now + 8 })
+        l = TaskLogic.delete(l, "a", now + 9)
+        assertTrue(TaskLogic.visible(l).isEmpty())
         fails { TaskLogic.delete(l, "a") }
     }
 
@@ -77,9 +78,12 @@ class TaskLogicTest {
         val (_, p2) = TaskLogic.reconcile(listOf(shared("a", "j1").copy(done = true)), listOf(row("j1", "pendiente")), now)
         assertEquals(listOf("j1" to "hecho"), p2.toResolve)
         assertFalse(p2.changed)
-        // Both open, or both closed: nothing to do.
-        assertEquals(SyncPlan(), TaskLogic.reconcile(listOf(shared("a", "j1")), listOf(row("j1", "pendiente")), now).second)
-        assertEquals(SyncPlan(), TaskLogic.reconcile(listOf(shared("a", "j1").copy(done = true)), listOf(row("j1", "hecho")), now).second)
+        // Both open, or both closed: nothing to do on her side (it only remembers that they agree).
+        val open = TaskLogic.reconcile(listOf(shared("a", "j1")), listOf(row("j1", "pendiente")), now)
+        assertTrue(open.second.toAdd.isEmpty() && open.second.toResolve.isEmpty())
+        assertEquals("pendiente", open.first[0].jinxStatus)
+        val closed = TaskLogic.reconcile(listOf(shared("a", "j1").copy(done = true)), listOf(row("j1", "hecho")), now)
+        assertTrue(closed.second.toAdd.isEmpty() && closed.second.toResolve.isEmpty())
     }
 
     @Test

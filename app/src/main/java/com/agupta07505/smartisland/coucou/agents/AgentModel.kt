@@ -4,6 +4,7 @@
 
 package com.agupta07505.smartisland.coucou.agents
 
+import org.json.JSONArray
 import org.json.JSONObject
 
 /** One question of an AskUserQuestion. */
@@ -42,12 +43,18 @@ sealed class RemoteMsg {
     data class Request(val pending: Pending) : RemoteMsg()
     data class Resolved(val id: String, val decision: String) : RemoteMsg()
     data class Ack(val ok: Boolean, val id: String?, val why: String?) : RemoteMsg()
+    /** The laptop's own list of tasks, merged with the phone's (see remote.rs `tasks_sync`): a JSON array. */
+    data class Tasks(val json: String) : RemoteMsg()
     data object Pong : RemoteMsg()
     data object Disabled : RemoteMsg()
     data object Offline : RemoteMsg()
 }
 
 object RemoteProtocol {
+    /** The phone's whole list, tombstones included, for the laptop to merge with its own. */
+    fun tasksSync(tasksJson: String): String =
+        JSONObject().put("op", "tasks_sync").put("tasks", JSONArray(tasksJson)).toString()
+
     fun parse(line: String, now: Long): RemoteMsg? {
         val o = runCatching { JSONObject(line) }.getOrNull() ?: return null
         fun s(k: String) = o.optString(k, "").takeIf { it != "null" } ?: ""
@@ -60,6 +67,7 @@ object RemoteProtocol {
             "approval", "question" -> pendingOf(o, now)?.let { RemoteMsg.Request(it) }
             "resolved" -> RemoteMsg.Resolved(s("request_id"), s("decision"))
             "ack" -> RemoteMsg.Ack(o.optBoolean("ok"), o.optString("request_id").takeIf { it.isNotEmpty() }, o.optString("why").takeIf { it.isNotEmpty() })
+            "tasks" -> o.optJSONArray("tasks")?.let { RemoteMsg.Tasks(it.toString()) }
             "pong" -> RemoteMsg.Pong
             "disabled" -> RemoteMsg.Disabled
             "offline" -> RemoteMsg.Offline

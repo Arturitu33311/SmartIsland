@@ -15,20 +15,27 @@ import java.io.File
  */
 class TaskStore(private val file: File) {
 
+    /** Everything on disk, tombstones included (what the sync and the merge work on). */
     @Synchronized
-    fun load(): List<CoucouTask> {
+    fun loadAll(): List<CoucouTask> {
         if (!file.exists()) return emptyList()
         return runCatching { decode(file.readText()) }.getOrDefault(emptyList())
     }
 
-    /** Reads the list, lets [change] produce the new one, saves it and returns it. */
+    /** What the screens see: the list without the tombstones. */
+    fun load(): List<CoucouTask> = TaskLogic.visible(loadAll())
+
+    /**
+     * Reads the whole list (tombstones included), lets [change] produce the new one, saves it and returns what
+     * the screens see of it.
+     */
     @Synchronized
     fun update(change: (List<CoucouTask>) -> List<CoucouTask>): List<CoucouTask> {
-        val next = change(load())
+        val next = TaskLogic.purgeTombstones(change(loadAll()), System.currentTimeMillis() / 1000)
         val tmp = File(file.parentFile, file.name + ".tmp")
         tmp.writeText(encode(next))
         check(tmp.renameTo(file)) { "Could not save the tasks" }
-        return next
+        return TaskLogic.visible(next)
     }
 
     companion object {
@@ -46,7 +53,11 @@ class TaskStore(private val file: File) {
                     .put("completedAt", t.completedAt ?: JSONObject.NULL)
                     .put("jinx", t.jinx)
                     .put("jinxId", t.jinxId ?: JSONObject.NULL)
-                    .put("origin", t.origin ?: JSONObject.NULL),
+                    .put("origin", t.origin ?: JSONObject.NULL)
+                    .put("updatedAt", t.updatedAt)
+                    .put("deleted", t.deleted)
+                    .put("jinxStatus", t.jinxStatus ?: JSONObject.NULL)
+                    .put("jinxSynced", t.jinxSynced),
             )
         }.toString()
 
@@ -54,17 +65,28 @@ class TaskStore(private val file: File) {
             val arr = JSONArray(json)
             return (0 until arr.length()).map { i ->
                 val o = arr.getJSONObject(i)
+                val id = o.getString("id")
+                val created = o.optLong("created")
+                val completedAt = if (o.isNull("completedAt")) null else o.getLong("completedAt")
+                var updatedAt = o.optLong("updatedAt", 0L)
+                // A file from before the stamps: what was made here counts from when it was made or finished;
+                // what was taken in from Jinx stays at 0, so any real change beats it.
+                if (updatedAt == 0L && !id.startsWith("j-")) updatedAt = maxOf(completedAt ?: created, created)
                 CoucouTask(
-                    id = o.getString("id"),
+                    id = id,
                     title = o.getString("title"),
                     done = o.optBoolean("done"),
                     remindAt = if (o.isNull("remindAt")) null else o.getLong("remindAt"),
                     notified = o.optBoolean("notified"),
-                    created = o.optLong("created"),
-                    completedAt = if (o.isNull("completedAt")) null else o.getLong("completedAt"),
+                    created = created,
+                    completedAt = completedAt,
                     jinx = o.optBoolean("jinx"),
                     jinxId = if (o.isNull("jinxId")) null else o.getString("jinxId"),
                     origin = if (o.isNull("origin")) null else o.optString("origin").takeIf { it.isNotEmpty() },
+                    updatedAt = updatedAt,
+                    deleted = o.optBoolean("deleted"),
+                    jinxStatus = if (o.isNull("jinxStatus")) null else o.optString("jinxStatus").takeIf { it.isNotEmpty() },
+                    jinxSynced = o.optLong("jinxSynced", 0L),
                 )
             }
         }

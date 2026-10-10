@@ -35,10 +35,35 @@ object CoucouTasks {
 
     private fun nowSec() = System.currentTimeMillis() / 1000
 
+    /** The whole list, tombstones included, as the laptop merges it (same JSON as its own tasks.json). */
+    fun snapshotForLaptop(context: Context): String = TaskStore.encode(TaskStore.of(context).loadAll())
+
+    /**
+     * The laptop's list, merged with ours: per task the newest change wins, wherever it was made. What the
+     * laptop finished or deleted while the phone was away leaves the island; what it added gets its alarm.
+     */
+    fun mergeFromLaptop(context: Context, json: String) {
+        val remote = runCatching { TaskStore.decode(json) }.getOrNull()?.mapNotNull { TaskLogic.sanitizeRemote(it) } ?: return
+        var changed = false
+        val before = TaskStore.of(context).loadAll().associate { it.id to (it.done || it.deleted) }
+        val list = TaskStore.of(context).update { all ->
+            val (merged, c) = TaskLogic.merge(all, remote, nowSec())
+            changed = c
+            merged
+        }
+        if (!changed) return
+        val all = TaskStore.of(context).loadAll()
+        for (t in all) if ((t.done || t.deleted) && before[t.id] != true) withdraw(context, t.id)
+        ReminderScheduler.rearm(context)
+        _state.value = list
+        CoucouRuntime.kick()
+    }
+
     /** Something changed that Jinx should hear of (a no-op if the sync is off). */
     private fun changed(context: Context) {
         CoucouRuntime.apply(context)
         CoucouRuntime.kick()
+        CoucouRuntime.kickLaptop()
     }
     private fun offset(t: Long) = TimeZone.getDefault().getOffset(t * 1000) / 1000L
 
@@ -78,9 +103,10 @@ object CoucouTasks {
     }
 
     fun snooze(context: Context, id: String, seconds: Long): List<CoucouTask> {
-        val list = TaskStore.of(context).update { TaskLogic.snooze(it, id, nowSec() + seconds) }
+        val list = TaskStore.of(context).update { TaskLogic.snooze(it, id, nowSec() + seconds, nowSec()) }
         withdraw(context, id)
         ReminderScheduler.rearm(context)
+        changed(context)
         _state.value = list
         return list
     }

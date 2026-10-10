@@ -71,6 +71,7 @@ object JinxProtocol {
                 categoria = r.optString("categoria").takeIf { it.isNotEmpty() && it != "null" },
                 source = r.optString("source").takeIf { it.isNotEmpty() && it != "null" },
                 status = r.optString("status", "pendiente"),
+                updatedAt = r.optString("updated_at").takeIf { it.isNotEmpty() && it != "null" }?.let { TaskLogic.isoToUnix(it) },
             )
         }
     }

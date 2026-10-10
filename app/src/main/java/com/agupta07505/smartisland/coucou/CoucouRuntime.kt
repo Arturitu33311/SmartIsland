@@ -147,6 +147,11 @@ object CoucouRuntime {
         kicks.trySend(Unit)
     }
 
+    /** A task changed here: the laptop hears of it as soon as the link is there (now, or when it comes back). */
+    fun kickLaptop() {
+        agents?.requestTaskSync()
+    }
+
     private fun runSync(app: Context) {
         val profile = PhoneSettings.profile(app, PhoneSettings.SERVER)
         if (!profile.paired) {
