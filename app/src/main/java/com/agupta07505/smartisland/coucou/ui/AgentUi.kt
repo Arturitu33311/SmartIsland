@@ -193,11 +193,16 @@ fun ApprovalExpanded(notification: IslandNotification?, bottomPadding: Dp, onCol
         // lines has to be opened (tap it) first, and one the laptop itself had to shorten is not allowed
         // from here at all.
         val full = p?.detail ?: notification?.text.orEmpty()
-        val tooLongToFit = full.length > ApprovalReview.FITS_CHARS || full.count { it == '\n' } >= 3
-        val shortenedByLaptop = ApprovalReview.shortenedByLaptop(full)
         var read by remember(notification?.key) { mutableStateOf(false) }
+        // What Compose really had to cut, not a guess from the length (the font scale and the island's
+        // width change how much fits): while closed, a cut means "open it first"; opened, a cut that
+        // remains means it cannot be reviewed here at all.
+        var cut by remember(notification?.key, read) { mutableStateOf(false) }
+        val tooLongToFit = cut || full.length > ApprovalReview.FITS_CHARS || full.count { it == '\n' } >= 3
+        val shortenedByLaptop = ApprovalReview.shortenedByLaptop(full) || (read && cut)
         Text(
             full,
+            onTextLayout = { cut = it.hasVisualOverflow },
             color = Color.White.copy(alpha = 0.78f), fontSize = 12.sp, fontFamily = FontFamily.Monospace,
             maxLines = if (read) 12 else 3, overflow = TextOverflow.Ellipsis,
             modifier = Modifier
