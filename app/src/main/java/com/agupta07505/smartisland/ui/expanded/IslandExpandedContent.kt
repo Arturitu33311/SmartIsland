@@ -179,6 +179,7 @@ fun IslandExpandedContent(
                 IslandMode.Reminder -> height.coerceIn(105.dp, 150.dp)
                 IslandMode.Desk -> height.coerceIn(150.dp, 460.dp)
                 IslandMode.Agent -> height.coerceIn(100.dp, 160.dp)
+                IslandMode.JinxMsg -> height.coerceIn(120.dp, 200.dp)
                 IslandMode.Approval -> height.coerceIn(150.dp, 210.dp)
                 IslandMode.Question -> height.coerceIn(150.dp, 280.dp)
                 IslandMode.Empty, null -> height.coerceIn(150.dp, 460.dp)
@@ -331,6 +332,11 @@ fun IslandExpandedContent(
                                 settings = settings
                             )
                             IslandMode.Agent -> com.agupta07505.smartisland.coucou.ui.AgentExpanded(bottomPadding = bottomPadding)
+                            IslandMode.JinxMsg -> com.agupta07505.smartisland.coucou.presence.JinxMsgExpanded(
+                                notification = notification,
+                                bottomPadding = bottomPadding,
+                                onCollapse = onCollapse
+                            )
                             IslandMode.Approval -> com.agupta07505.smartisland.coucou.ui.ApprovalExpanded(notification = notification, bottomPadding = bottomPadding, onCollapse = onCollapse)
                             IslandMode.Question -> com.agupta07505.smartisland.coucou.ui.QuestionExpanded(notification = notification, bottomPadding = bottomPadding, onCollapse = onCollapse)
                             IslandMode.Desk -> androidx.compose.foundation.layout.Box(Modifier.padding(start = 18.dp, top = 16.dp, end = 18.dp, bottom = bottomPadding.coerceAtLeast(12.dp))) {
@@ -488,8 +494,9 @@ private fun NotificationBackdrop(
         IslandMode.Timer -> Color(settings.timerColor)
         IslandMode.Stopwatch -> Color(settings.stopwatchColor)
         IslandMode.Reminder, IslandMode.Approval -> com.agupta07505.smartisland.coucou.ui.ReminderAmber
-        IslandMode.Desk -> com.agupta07505.smartisland.coucou.ui.MochiCoral
+        IslandMode.Desk -> com.agupta07505.smartisland.coucou.ui.MochiEmerald
         IslandMode.Agent -> com.agupta07505.smartisland.coucou.ui.ClaudeOrange
+        IslandMode.JinxMsg -> com.agupta07505.smartisland.coucou.ui.MochiEmerald
         IslandMode.Question -> com.agupta07505.smartisland.coucou.ui.QuestionBlue
         else -> Color(settings.notificationDotColor)
     }

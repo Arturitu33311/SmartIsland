@@ -267,6 +267,8 @@ fun Notification.toIslandMode(
     // 7. Media & Music Playback
     val hasMediaSession = extras?.containsKey(Notification.EXTRA_MEDIA_SESSION) == true
     if (category == Notification.CATEGORY_TRANSPORT || hasMediaSession) {
+        // NOTE: remote mirrors (KDE Connect's PC player) keep Music here on purpose: the card
+        // stays fully alive with artwork and controls, it only yields priority in arrange().
         return IslandMode.Music
     }
 

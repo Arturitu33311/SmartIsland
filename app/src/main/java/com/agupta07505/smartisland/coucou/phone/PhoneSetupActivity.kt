@@ -46,12 +46,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.agupta07505.smartisland.coucou.CoucouRuntime
 import com.agupta07505.smartisland.coucou.agents.AgentUi
 import com.agupta07505.smartisland.coucou.phone.PhoneSettings.followClaude
+import com.agupta07505.smartisland.coucou.phone.PhoneSettings.followJinx
 import com.agupta07505.smartisland.coucou.phone.PhoneSettings.jinxSync
+import com.agupta07505.smartisland.coucou.presence.MochiPresence
 import com.agupta07505.smartisland.coucou.phone.PhoneSettings.showDesk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -147,15 +150,46 @@ private fun Setup() {
                     }
                 },
             )
+            PresenceCard()
         }
         error?.let { Text(it, color = Color(0xFFF5A524), fontSize = 12.sp) }
         Spacer(Modifier.padding(20.dp))
     }
 }
 
+/**
+ * Where Jinx's texts reach this phone: the presence server over Tailscale,
+ * with the inbox key. Text only, no voice. Needs no ssh: just the key.
+ */
 @Composable
-private fun Card(title: String, content: @Composable () -> Unit) {
-    Column(
+private fun PresenceCard() {
+    val context = LocalContext.current
+    var on by remember { mutableStateOf(context.followJinx) }
+    var url by remember { mutableStateOf(PhoneSettings.presenceUrl(context)) }
+    var key by remember { mutableStateOf(PhoneSettings.mochiKey(context)) }
+    val status by MochiPresence.status.collectAsState()
+
+    Card("4 · Jinx's texts (presence)") {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(checked = on, onCheckedChange = { on = it; context.followJinx = it; CoucouRuntime.apply(context) })
+            Spacer(Modifier.width(10.dp))
+            Text("Hear Jinx's texts on this phone", color = Color.White, fontSize = 14.sp)
+        }
+        Text(
+            "Heartbeat says this phone is looked at; Jinx's texts then land on the island instead of Telegram. Only while the screen is on. The key is the same as ~/.config/mochi-presence/key on the server.",
+            color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp,
+        )
+        OutlinedTextField(url, { url = it; PhoneSettings.savePresenceUrl(context, it) },
+            label = { Text("Presence URL") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(key, { key = it; PhoneSettings.saveMochiKey(context, it) },
+            label = { Text("Inbox key") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+            visualTransformation = PasswordVisualTransformation())
+        Text(status, color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp)
+    }
+}
+
+@Composable
+private fun Card(title: String, content: @Composable () -> Unit) {    Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surface).padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {

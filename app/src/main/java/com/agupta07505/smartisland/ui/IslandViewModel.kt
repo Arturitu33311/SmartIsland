@@ -16,6 +16,7 @@ import com.agupta07505.smartisland.data.SmartIslandSettings
 import com.agupta07505.smartisland.data.SmartIslandSettingsRepository
 import com.agupta07505.smartisland.model.IslandMode
 import com.agupta07505.smartisland.model.IslandNotification
+import com.agupta07505.smartisland.model.YIELDED_MUSIC_PRIORITY
 import com.agupta07505.smartisland.model.WAITING_PRIORITY
 import com.agupta07505.smartisland.model.priority
 import com.agupta07505.smartisland.util.runSuspendCatchingLogged
@@ -97,7 +98,28 @@ class IslandViewModel(
         list.filterNot { notif ->
             (!s.enableBatteryMode && notif.mode == IslandMode.Battery) ||
             (!fgPkg.isNullOrEmpty() && notif.mode == IslandMode.Music && notif.packageName == fgPkg)
-        }.sortedWith(compareByDescending<IslandNotification> { it.mode.priority }.thenByDescending { it.timeMillis })
+        }.let { filtered ->
+            // News must surface over a playing song: a plain notification (40) otherwise hides
+            // behind music (50) until it pauses, while with music off it lands on top and shows.
+            val now = System.currentTimeMillis()
+            val freshNews = filtered.any {
+                it.mode == IslandMode.Notification && now - it.timeMillis < FRESH_NEWS_MS
+            }
+            filtered.sortedWith(compareByDescending<IslandNotification> { effectivePriority(it, freshNews) }.thenByDescending { it.timeMillis })
+        }
+
+    /** A paused player or a remote mirror keeps its Music card and controls, but never camps
+     * above news: only music actually sounding on this phone keeps the throne, so a stale player
+     * or the PC's mirror can never hide everything behind it. While fresh news (< 30 s) waits,
+     * even sounding music steps aside so the news shows instead of hiding behind the song. */
+    private fun effectivePriority(notif: IslandNotification, freshNews: Boolean = false) =
+        if (notif.mode == IslandMode.Music && notif.mediaIsPlaying && notif.packageName != "org.kde.kdeconnect_tp" && !freshNews) {
+            notif.mode.priority
+        } else if (notif.mode == IslandMode.Music) {
+            YIELDED_MUSIC_PRIORITY
+        } else {
+            notif.mode.priority
+        }
 
     /**
      * A new event takes the front, as it always did, except over the person typing or over something that
@@ -209,7 +231,7 @@ class IslandViewModel(
         // expires; Mochi's desk and a reminder get time to be used. Everything else folds after 5 s as before.
         val waitMs = when (visibleNotifications.value.getOrNull(selectedIndex.value)?.mode) {
             IslandMode.Approval, IslandMode.Question -> 115_000L
-            IslandMode.Desk, IslandMode.Reminder -> 25_000L
+            IslandMode.Desk, IslandMode.Reminder, IslandMode.JinxMsg -> 25_000L
             else -> AUTO_COLLAPSE_DELAY_MS
         }
         autoCollapseJob = viewModelScope.launch {
@@ -266,6 +288,7 @@ class IslandViewModel(
         private const val TAG = "IslandViewModel"
         private const val AUTO_COLLAPSE_DELAY_MS = 5000L
         private const val PIN_MS = 8000L
+        private const val FRESH_NEWS_MS = 30_000L
 
         fun provideFactory(
             settingsRepo: SmartIslandSettingsRepository,

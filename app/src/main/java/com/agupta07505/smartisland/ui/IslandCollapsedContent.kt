@@ -14,6 +14,7 @@ import com.agupta07505.smartisland.ui.components.DottedRing
 
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -101,6 +102,15 @@ fun IslandCollapsedContent(
     val translationProgress = 1f - collapsedAlpha
     val translationXLeft = translationProgress * maxTranslationPx
     val translationXRight = -translationProgress * maxTranslationPx
+    // The island dresses in what is playing: the cover's colour (or the setting when the cover
+    // has none), crossfading between tracks instead of jumping.
+    // (Mochi himself lives only in the secondary bubble — nothing of him is drawn on main.)
+    val musicArtwork = if (mode == IslandMode.Music) notification?.largeIcon ?: notification?.icon else null
+    val musicCover = com.agupta07505.smartisland.coucou.ui.rememberCoverColor(musicArtwork)
+    val musicAccent by animateColorAsState(
+        targetValue = musicCover ?: Color(settings.musicVisualizerColor),
+        label = "musicAccent"
+    )
 
     Box(modifier = modifier.fillMaxSize()) {
         // Left Slot (Icon / Glyphs)
@@ -135,6 +145,8 @@ fun IslandCollapsedContent(
                     }
                 }
                 IslandMode.Music -> {
+                    // The island shows only the artwork here: Mochi already dances in his secondary
+                    // bubble, and doubling him on the main pill looked duplicated.
                     val artwork = notification?.largeIcon ?: notification?.icon
                     if (artwork != null) {
                         Image(
@@ -149,7 +161,7 @@ fun IslandCollapsedContent(
                             modifier = Modifier
                                 .size(22.dp)
                                 .clip(CircleShape)
-                                .background(Color(settings.musicVisualizerColor)),
+                                .background(musicAccent),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
@@ -220,6 +232,7 @@ fun IslandCollapsedContent(
                 IslandMode.Reminder -> com.agupta07505.smartisland.coucou.ui.ReminderCollapsedGlyph()
                 IslandMode.Desk -> com.agupta07505.smartisland.coucou.ui.DeskCollapsedGlyph(notification)
                 IslandMode.Agent, IslandMode.Approval, IslandMode.Question -> com.agupta07505.smartisland.coucou.ui.AgentCollapsedGlyph(notification)
+                IslandMode.JinxMsg -> com.agupta07505.smartisland.coucou.presence.JinxMsgCollapsedGlyph(notification)
                 IslandMode.Empty -> Unit
             }
         }
@@ -259,7 +272,7 @@ fun IslandCollapsedContent(
                 IslandMode.Music -> {
                     AudioVisualizer(
                         isPlaying = notification?.mediaIsPlaying == true,
-                        color = Color(settings.musicVisualizerColor)
+                        color = musicAccent
                     )
                 }
                 IslandMode.Battery -> {
@@ -315,6 +328,7 @@ fun IslandCollapsedContent(
                 IslandMode.Reminder -> com.agupta07505.smartisland.coucou.ui.ReminderCollapsedRight()
                 IslandMode.Desk -> com.agupta07505.smartisland.coucou.ui.DeskCollapsedRight(notification)
                 IslandMode.Agent, IslandMode.Approval, IslandMode.Question -> com.agupta07505.smartisland.coucou.ui.AgentCollapsedRight(notification)
+                IslandMode.JinxMsg -> com.agupta07505.smartisland.coucou.presence.JinxMsgCollapsedRight(notification)
                 IslandMode.Empty -> Unit
             }
         }
@@ -495,6 +509,9 @@ private fun AudioVisualizer(
     color: Color,
     modifier: Modifier = Modifier
 ) {
+    // Decorative bars, not a real FFT: true audio coupling would need RECORD_AUDIO (a prompt, more
+    // battery, and Samsung usually blocks output-mix capture anyway), so the bars dance to their
+    // own 25%-slowed rhythm and simply settle when paused.
     Row(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -508,7 +525,9 @@ private fun AudioVisualizer(
                 initialValue = min,
                 targetValue = if (isPlaying) max else min,
                 animationSpec = infiniteRepeatable(
-                    animation = tween(durationMillis = 350 + index * 80, easing = FastOutSlowInEasing),
+                    // Half the original 350/430/510 ms speed: at island size the faster bars
+                    // read as flicker, not music.
+                    animation = tween(durationMillis = (350 + index * 80) * 2, easing = FastOutSlowInEasing),
                     repeatMode = RepeatMode.Reverse
                 ),
                 label = "bar_$index"

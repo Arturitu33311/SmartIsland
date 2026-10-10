@@ -11,6 +11,8 @@ import com.agupta07505.smartisland.data.SmartIslandNotificationRepository
 import com.agupta07505.smartisland.data.SmartIslandSettingsRepository
 import com.agupta07505.smartisland.model.IslandMode
 import com.agupta07505.smartisland.model.IslandNotification
+import com.agupta07505.smartisland.model.YIELDED_MUSIC_PRIORITY
+import com.agupta07505.smartisland.model.priority
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -185,6 +187,91 @@ class IslandViewModelTest {
         // Notification is still captured and selected for compact pill
         assertEquals(1, viewModel.visibleNotifications.value.size)
         assertEquals(0, viewModel.selectedIndex.value)
+    }
+
+    @Test
+    fun testPausedMusicYieldsToNewsButPlayingKeepsThrone() = runTest {
+        // A paused player camps like a playing one unless it yields: news goes first, so a stale
+        // player can never hide everything behind it.
+        val settingsRepo = mockk<SmartIslandSettingsRepository>(relaxed = true)
+        val notifRepo = SmartIslandNotificationRepository()
+        val viewModel = IslandViewModel(settingsRepo, notifRepo)
+        val paused = IslandNotification(
+            key = "music_paused",
+            packageName = "com.spotify.music",
+            appName = "Spotify",
+            title = "Old Song",
+            text = "Old Artist",
+            mode = IslandMode.Music,
+            mediaIsPlaying = false,
+            timeMillis = System.currentTimeMillis() - 60_000,
+        )
+        val news = IslandNotification(
+            key = "news_1",
+            packageName = "org.kde.kdeconnect_tp",
+            appName = "KDE Connect",
+            title = "Ping",
+            text = "pong",
+            mode = IslandMode.Notification,
+            timeMillis = System.currentTimeMillis(),
+        )
+        notifRepo.postNotification(paused)
+        notifRepo.postNotification(news)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val keys = viewModel.visibleNotifications.value.map { it.key }
+        // News first, paused player after (still there, above the battery ring's 10).
+        assertEquals(listOf("news_1", "music_paused"), keys)
+        org.junit.Assert.assertTrue(YIELDED_MUSIC_PRIORITY < IslandMode.Notification.priority)
+
+        // Playing again with only old news around: the throne is hers.
+        notifRepo.removeNotification("news_1")
+        notifRepo.postNotification(paused.copy(key = "music_playing", mediaIsPlaying = true, timeMillis = System.currentTimeMillis() + 1))
+        notifRepo.postNotification(news.copy(key = "news_old", timeMillis = System.currentTimeMillis() - 60_000))
+        testDispatcher.scheduler.advanceUntilIdle()
+        assertEquals("music_playing", viewModel.visibleNotifications.value.first().key)
+
+        // Fresh news surfaces over the song for a while, then music returns.
+        notifRepo.postNotification(news.copy(key = "news_fresh", timeMillis = System.currentTimeMillis()))
+        testDispatcher.scheduler.advanceUntilIdle()
+        assertEquals("news_fresh", viewModel.visibleNotifications.value.first().key)
+    }
+
+    @Test
+    fun testRemoteMirrorKeepsCardButYieldsThrone() = runTest {
+        // KDE Connect mirrors the PC's player with an active session of its own: the card stays
+        // fully Music (artwork, controls), but news still goes first.
+        val settingsRepo = mockk<SmartIslandSettingsRepository>(relaxed = true)
+        val notifRepo = SmartIslandNotificationRepository()
+        val viewModel = IslandViewModel(settingsRepo, notifRepo)
+        val mirror = IslandNotification(
+            key = "kde_music",
+            packageName = "org.kde.kdeconnect_tp",
+            appName = "KDE Connect",
+            title = "PC Song",
+            text = "PC Artist",
+            mode = IslandMode.Music,
+            mediaIsPlaying = true,
+            timeMillis = System.currentTimeMillis() - 60_000,
+        )
+        val news = IslandNotification(
+            key = "news_2",
+            packageName = "com.whatsapp",
+            appName = "WhatsApp",
+            title = "Ana",
+            text = "hola",
+            mode = IslandMode.Notification,
+            timeMillis = System.currentTimeMillis(),
+        )
+        notifRepo.postNotification(mirror)
+        notifRepo.postNotification(news)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val first = viewModel.visibleNotifications.value.first()
+        assertEquals("news_2", first.key)
+        // The mirror is still there, still Music — only its priority yielded.
+        val kept = viewModel.visibleNotifications.value.first { it.key == "kde_music" }
+        assertEquals(IslandMode.Music, kept.mode)
     }
 }
 

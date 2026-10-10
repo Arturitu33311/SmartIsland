@@ -42,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -57,6 +58,7 @@ import androidx.compose.ui.unit.sp
 import com.agupta07505.smartisland.data.SmartIslandSettings
 import com.agupta07505.smartisland.di.SmartIslandRepositories
 import com.agupta07505.smartisland.model.IslandNotification
+import com.agupta07505.smartisland.coucou.ui.rememberCoverColor
 import com.agupta07505.smartisland.ui.WavyMusicSeekBar
 import com.agupta07505.smartisland.ui.bounceClick
 import com.agupta07505.smartisland.util.runCatchingLogged
@@ -311,6 +313,12 @@ fun MusicExpanded(
     }
 
     val artwork = notification?.largeIcon ?: metadataArtwork ?: notification?.icon
+    // The controls dress in the cover: its colour, or the setting when the cover has none,
+    // crossfading between tracks instead of jumping.
+    val coverAccent by animateColorAsState(
+        targetValue = rememberCoverColor(artwork) ?: Color(settings.musicVisualizerColor),
+        label = "coverAccent"
+    )
 
     Box(
         modifier = Modifier
@@ -363,7 +371,7 @@ fun MusicExpanded(
                     modifier = Modifier
                         .size(42.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(Color(settings.musicVisualizerColor))
+                        .background(coverAccent)
                         .padding(8.dp)
                 )
             }
@@ -391,6 +399,7 @@ fun MusicExpanded(
             WavyMusicSeekBar(
                 progress = progress,
                 isPlaying = localIsPlaying,
+                waveColor = coverAccent,
                 onSeek = { newProgress ->
                     if (durationMs != null && durationMs > 0) {
                         val newPosition = (newProgress * durationMs).toLong()

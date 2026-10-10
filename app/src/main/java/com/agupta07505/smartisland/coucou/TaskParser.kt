@@ -13,6 +13,23 @@ package com.agupta07505.smartisland.coucou
 object TaskParser {
     data class Parsed(val title: String, val whenSec: Long?)
 
+    /**
+     * A day picked on the calendar (epoch seconds of its local midnight) plus a time: the time
+     * of day the sentence carried ("viernes a las 17:30" → Friday 17:30), or [defaultHour] when
+     * it carried none. `offset` is this phone's zone offset in seconds east of UTC at a time.
+     */
+    fun withDay(dayStartSec: Long, parsedWhenSec: Long?, defaultHour: Int, offset: (Long) -> Long): Long {
+        val atMin = if (parsedWhenSec != null) {
+            Math.floorMod(parsedWhenSec + offset(parsedWhenSec), 86_400L) / 60
+        } else {
+            defaultHour * 60L
+        }
+        // Two passes so a daylight-saving jump inside the day still lands on the right wall time.
+        var t = dayStartSec + atMin * 60 - offset(dayStartSec + 12 * 3600)
+        t = dayStartSec + atMin * 60 - offset(t)
+        return t
+    }
+
     private val SPACES = Regex("\\s+")
 
     /** "14" / "10min" → its number and the letters after it. */

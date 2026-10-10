@@ -11,8 +11,10 @@ import com.agupta07505.smartisland.coucou.agents.SessionState
 import com.agupta07505.smartisland.coucou.phone.JinxSync
 import com.agupta07505.smartisland.coucou.phone.PhoneSettings
 import com.agupta07505.smartisland.coucou.phone.PhoneSettings.followClaude
+import com.agupta07505.smartisland.coucou.phone.PhoneSettings.followJinx
 import com.agupta07505.smartisland.coucou.phone.PhoneSettings.jinxSync
 import com.agupta07505.smartisland.coucou.phone.PhoneSettings.showDesk
+import com.agupta07505.smartisland.coucou.presence.MochiPresence
 import com.agupta07505.smartisland.coucou.ui.DeskState
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
@@ -105,6 +107,13 @@ object CoucouRuntime {
             IslandAgents.clear(app)
             agents = null
             _agentUi.value = AgentUi()
+        }
+
+        // Jinx's texts on this phone, through presence (no voice: text only)
+        if (app.followJinx) {
+            MochiPresence.start(app, scope)
+        } else {
+            MochiPresence.stop(app)
         }
 
         // Jinx's pendientes

@@ -46,4 +46,25 @@ object PhoneSettings {
     var Context.followClaude: Boolean
         get() = prefs(this).getBoolean("followClaude", false)
         set(v) = prefs(this).edit().putBoolean("followClaude", v).apply()
+
+    /** Hear Jinx's texts on this phone through presence (text only, no voice). */
+    var Context.followJinx: Boolean
+        get() = prefs(this).getBoolean("followJinx", false)
+        set(v) = prefs(this).edit().putBoolean("followJinx", v).apply()
+
+    /** Where presence lives (Tailscale base URL, no trailing slash). */
+    fun presenceUrl(c: Context): String =
+        prefs(c).getString("presenceUrl", "http://100.92.254.125:8897")
+            ?: "http://100.92.254.125:8897"
+
+    fun savePresenceUrl(c: Context, v: String) {
+        prefs(c).edit().putString("presenceUrl", v.trim().trimEnd('/')).apply()
+    }
+
+    /** Key for the presence inbox (same as ~/.config/mochi-presence/key on the server). */
+    fun mochiKey(c: Context): String = prefs(c).getString("mochiKey", "") ?: ""
+
+    fun saveMochiKey(c: Context, v: String) {
+        prefs(c).edit().putString("mochiKey", v.trim()).apply()
+    }
 }

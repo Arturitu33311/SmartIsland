@@ -291,11 +291,19 @@ class SmartIslandOverlayService : AccessibilityService() {
                     }
                     collapseJob?.cancel()
                     if (expanded) {
+                        // Grow the window to full-screen IMMEDIATELY so the Compose
+                        // spring animation runs inside an already-full-size window.
+                        // Resizing the window mid-animation is what makes the pill
+                        // visibly jump/flicker left or right while expanding.
                         isWindowExpanded = true
                         updateWindowLayoutParams(true, viewModel.settings.value)
                     } else {
+                        // Keep the window full-size while the collapse spring plays out,
+                        // then shrink it back to the pill-sized frame. This preserves the
+                        // reverse morph and avoids a window-resize mid-animation.
                         collapseJob = serviceScope.launch {
-                            kotlinx.coroutines.delay(AUTO_COLLAPSE_DELAY_MS)
+                            kotlinx.coroutines.delay(COLLAPSE_WINDOW_DELAY_MS)
+                            if (destroyed) return@launch
                             isWindowExpanded = false
                             updateWindowLayoutParams(false, viewModel.settings.value)
                         }
@@ -322,6 +330,16 @@ class SmartIslandOverlayService : AccessibilityService() {
                         return@collectLatest
                     }
                     updateWindowLayoutParams(isWindowExpanded, viewModel.settings.value)
+                }
+            }
+        }
+
+        serviceScope.launch {
+            runSuspendCatchingLogged(TAG, "Arrival-haptic collector failed") {
+                // A light tick when important news takes the island (calls, approvals, questions,
+                // reminders auto-expand): felt, not heard. Ordinary notifications stay silent.
+                viewModel.notificationRepo.autoExpandEvent.collect {
+                    if (!destroyed) com.agupta07505.smartisland.coucou.ui.Haptics.tap(applicationContext)
                 }
             }
         }
@@ -491,7 +509,6 @@ class SmartIslandOverlayService : AccessibilityService() {
     // runCatchingLogged so unsupported devices fall back without crashing.
     @SuppressLint("PrivateApi", "SoonBlockedPrivateApi")
     private fun setupTouchableRegion(view: ComposeView) {
-        android.util.Log.d(TAG, "setupTouchableRegion: starting registration for view=$view")
         runCatchingLogged(TAG, "Failed to setup touchable region") {
             val listenerClass = Class.forName("android.view.ViewTreeObserver\$OnComputeInternalInsetsListener")
             val insetsClass = Class.forName("android.view.ViewTreeObserver\$InternalInsetsInfo")
@@ -512,12 +529,15 @@ class SmartIslandOverlayService : AccessibilityService() {
             ) { _, method, args ->
                 if (method.name == "onComputeInternalInsets" && args != null && args.isNotEmpty()) {
                     val insets = args[0]
+                    // Re-read state on every callback (this fires per layout pass).
+                    // Capturing these values at setup time produced a stale touch
+                    // region right after expand/collapse, mis-routing taps during
+                    // the morph and compounding the perceived flicker.
                     val isExpanded = viewModel.expanded.value
                     val isGone = view.visibility == android.view.View.GONE
                     val settingsVal = viewModel.settings.value
                     val notificationsCount = viewModel.notifications.value.size
                     val isIdleHidden = settingsVal.hideWhenIdle && notificationsCount == 0 && !settingsVal.enableAppShortcuts
-                    android.util.Log.d(TAG, "onComputeInternalInsets callback: isExpanded=$isExpanded isGone=$isGone isIdleHidden=$isIdleHidden")
                     if (isGone || isIdleHidden) {
                         setTouchableInsetsMethod.invoke(insets, TOUCHABLE_INSETS_REGION)
                         val region = touchableRegionField.get(insets) as android.graphics.Region
@@ -559,8 +579,7 @@ class SmartIslandOverlayService : AccessibilityService() {
                         val top = 0
                         val right = (groupEndPx + touchPaddingXPx).toInt().coerceAtMost(screenWidth)
                         val bottom = pillHeightPx.toInt()
-                        
-                        android.util.Log.d(TAG, "onComputeInternalInsets: region set to ($left, $top, $right, $bottom), isSplitMode=$isSplitMode")
+
                         val region = touchableRegionField.get(insets) as android.graphics.Region
                         region.set(left, top, right, bottom)
                     }
@@ -570,16 +589,15 @@ class SmartIslandOverlayService : AccessibilityService() {
             
             val registerListener = {
                 val observer = view.viewTreeObserver
-                android.util.Log.d(TAG, "registerListener lambda: viewTreeObserver=$observer, isAlive=${observer.isAlive}")
                 if (observer.isAlive) {
                     val addListenerMethod = observer.javaClass.getMethod(
                         "addOnComputeInternalInsetsListener",
                         listenerClass
                     )
                     addListenerMethod.invoke(observer, proxyListener)
+                    val wasSupported = isTouchableRegionSupported.value
                     isTouchableRegionSupported.value = true
-                    android.util.Log.d(TAG, "OnComputeInternalInsetsListener successfully registered on live ViewTreeObserver")
-                    if (::viewModel.isInitialized && !isWindowExpanded) {
+                    if (::viewModel.isInitialized && !isWindowExpanded && !wasSupported) {
                         updateWindowLayoutParams(false, viewModel.settings.value)
                     }
                 }
@@ -587,17 +605,15 @@ class SmartIslandOverlayService : AccessibilityService() {
             
             // ViewTreeObserver changes when the view is attached to a window.
             // We must register the listener on the live ViewTreeObserver of the attached window.
-            android.util.Log.d(TAG, "setupTouchableRegion: isAttachedToWindow=${view.isAttachedToWindow}")
             if (view.isAttachedToWindow) {
                 registerListener()
             } else {
                 view.addOnAttachStateChangeListener(object : android.view.View.OnAttachStateChangeListener {
                     override fun onViewAttachedToWindow(v: android.view.View) {
-                        android.util.Log.d(TAG, "onViewAttachedToWindow: registering listener now")
                         registerListener()
                     }
                     override fun onViewDetachedFromWindow(v: android.view.View) {
-                        android.util.Log.d(TAG, "onViewDetachedFromWindow called")
+                        // No-op: window teardown is handled in removeCollapsedWindow()
                     }
                 })
             }
@@ -674,6 +690,10 @@ class SmartIslandOverlayService : AccessibilityService() {
             0
         }
 
+        // iOS-style backdrop: while expanded the system itself blurs what sits behind the island
+        // (zero GPU cost in-app). Only on API 31+, where windows can ask for it; elsewhere 0.
+        val targetBlur = if (expanded && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) 45 else 0
+
         val lp = lastParams
         if (lp != null &&
             lp.width == w &&
@@ -681,7 +701,8 @@ class SmartIslandOverlayService : AccessibilityService() {
             lp.flags == currentFlags &&
             lp.x == currentX &&
             lp.y == currentY &&
-            lp.softInputMode == currentSoftInputMode
+            lp.softInputMode == currentSoftInputMode &&
+            (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || lp.blurBehindRadius == targetBlur)
         ) {
             return
         }
@@ -699,6 +720,9 @@ class SmartIslandOverlayService : AccessibilityService() {
             softInputMode = currentSoftInputMode
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                blurBehindRadius = targetBlur
             }
         }
         lastParams = params
@@ -979,6 +1003,8 @@ class SmartIslandOverlayService : AccessibilityService() {
         private const val WINDOWING_MODE_FREEFORM = 5
         private const val OVERLAY_CHANNEL_ID = "smart_island_overlay"
         private const val OVERLAY_CHANNEL_NAME = "Smart Island overlay"
-        private const val AUTO_COLLAPSE_DELAY_MS = 220L
+        // Must cover the longest spring settle (~520f stiffness) of the collapse
+        // morph so the window is only shrunk after the pill has visually landed.
+        private const val COLLAPSE_WINDOW_DELAY_MS = 650L
     }
 }

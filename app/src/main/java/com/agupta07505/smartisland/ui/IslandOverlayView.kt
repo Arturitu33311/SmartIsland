@@ -12,13 +12,17 @@ import com.agupta07505.smartisland.model.SwipeAction
 import com.agupta07505.smartisland.ui.expanded.IslandExpandedContent
 import com.agupta07505.smartisland.ui.expanded.trySendFirstAction
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDp
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -48,6 +52,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.LaunchedEffect
@@ -58,6 +63,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -68,9 +75,17 @@ import com.agupta07505.smartisland.data.SmartIslandSettings
 import com.agupta07505.smartisland.di.SmartIslandRepositories
 import com.agupta07505.smartisland.model.IslandMode
 import com.agupta07505.smartisland.model.IslandNotification
+import com.agupta07505.smartisland.coucou.IslandDesk
+import com.agupta07505.smartisland.coucou.phone.PhoneSettings.showDesk
 import com.agupta07505.smartisland.data.LaunchableApp
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -144,9 +159,18 @@ fun IslandOverlayView(
         dampingRatio = 0.72f,
         stiffness = 520f
     )
+    // Opening bounces a touch (Apple-style overshoot); closing stays calm so it never wobbles away.
+    val expandSpec = spring<androidx.compose.ui.unit.Dp>(
+        dampingRatio = 0.60f,
+        stiffness = 480f
+    )
     val sizeSpecFloat = spring<Float>(
         dampingRatio = 0.72f,
         stiffness = 520f
+    )
+    val expandSpecFloat = spring<Float>(
+        dampingRatio = 0.60f,
+        stiffness = 480f
     )
     val heightSpec = spring<androidx.compose.ui.unit.Dp>(
         dampingRatio = 0.76f,
@@ -159,6 +183,26 @@ fun IslandOverlayView(
 
     val activeNotification = notifications.getOrNull(safeIndex)
     val activeMode = activeNotification?.mode ?: IslandMode.Empty
+
+    // Mochi lives in the secondary bubble, always: the main pill keeps only notifications.
+    // His desk card stays in the list so tapping him opens the tasks; it never rests on main.
+    val deskNotification = notifications.firstOrNull { it.key == IslandDesk.KEY }
+    val deskIndex = if (deskNotification != null) notifications.indexOfFirst { it.key == deskNotification.key } else -1
+    // Shown whenever the island shows (and Mochi is wanted), except when his desk is the only
+    // thing on it: then the main pill already shows him, and a second Mochi beside it would
+    // look like a bug.
+    val mochiSecondary = !settings.enableNotchMode && context.showDesk &&
+        !(notifications.size == 1 && activeNotification?.key == IslandDesk.KEY)
+
+    // His desk never rests on the main pill: it is his home in the secondary bubble.
+    // (Tapping him selects it on purpose and expands; collapsing hands main back to the news.)
+    // Guarded by !expanded so an open desk is never yanked away while being read.
+    LaunchedEffect(activeNotification?.key, expanded, notifications.size) {
+        if (!expanded && activeNotification?.key == IslandDesk.KEY && deskIndex >= 0 && notifications.size > 1) {
+            val next = notifications.indexOfFirst { it.key != IslandDesk.KEY }
+            if (next >= 0) currentOnPageSelected(next)
+        }
+    }
 
     val initialEstimatedHeight = remember(activeMode, notifications.isEmpty()) {
         if (notifications.isEmpty()) 135.dp else defaultEstimatedHeightForMode(activeMode)
@@ -175,7 +219,7 @@ fun IslandOverlayView(
     val miniPillWidth = settings.width.dp
     val circleSize = settings.height.dp
     val compactShapes = compactNotificationShapes(notifications.size, expanded)
-    val hasCompanion = if (settings.enableNotchMode) false else notifications.size >= 2
+    val hasCompanion = if (settings.enableNotchMode) false else mochiSecondary
     val isCircleLeft = settings.circlePosition == SmartIslandSettings.CIRCLE_POSITION_LEFT
     val collapsedGroupWidth = settings.width.dp + if (hasCompanion) compactGap + circleSize else 0.dp
 
@@ -236,20 +280,29 @@ fun IslandOverlayView(
 
     val isHiding = isIdleHiding || (settings.autoHidePill && isAutoHidden)
     val pillBackgroundColor = Color(settings.pillColor)
+    // A light wash of the album cover over the main pill while music plays (the bars already wear
+    // it full-strength): 35% toward the cover, gliding back to the setting when music stops or
+    // the cover has no colour. The secondary bubble stays neutral so Mochi always pops.
+    val musicCoverArt = if (activeMode == IslandMode.Music) activeNotification?.largeIcon ?: activeNotification?.icon else null
+    val musicCoverTint = com.agupta07505.smartisland.coucou.ui.rememberCoverColor(musicCoverArt)
+    val pillTint by animateColorAsState(
+        targetValue = if (musicCoverTint != null) lerp(pillBackgroundColor, musicCoverTint, 0.35f) else pillBackgroundColor,
+        label = "pillTint"
+    )
 
-    val width by transition.animateDp(transitionSpec = { sizeSpec }, label = "islandWidth") {
+    val width by transition.animateDp(transitionSpec = { if (targetState) expandSpec else sizeSpec }, label = "islandWidth") {
         if (it) expandedWidth else if (isHiding) 0.dp else settings.width.dp
     }
-    val height by transition.animateDp(transitionSpec = { heightSpec }, label = "islandHeight") {
+    val height by transition.animateDp(transitionSpec = { if (targetState) expandSpec else heightSpec }, label = "islandHeight") {
         if (it) expandedHeight else if (isHiding) 0.dp else settings.height.dp
     }
-    val yOffset by transition.animateDp(transitionSpec = { sizeSpec }, label = "islandYOffset") {
+    val yOffset by transition.animateDp(transitionSpec = { if (targetState) expandSpec else sizeSpec }, label = "islandYOffset") {
         if (it) expandedTopOffset else 0.dp
     }
-    val radius by transition.animateDp(transitionSpec = { sizeSpec }, label = "islandRadius") {
+    val radius by transition.animateDp(transitionSpec = { if (targetState) expandSpec else sizeSpec }, label = "islandRadius") {
         if (it) 34.dp else if (isHiding) 0.dp else settings.cornerRadius.dp
     }
-    val animatedXOffset by transition.animateDp(transitionSpec = { sizeSpec }, label = "islandXOffset") {
+    val animatedXOffset by transition.animateDp(transitionSpec = { if (targetState) expandSpec else sizeSpec }, label = "islandXOffset") {
         if (it) 0.dp else collapsedMainOffset
     }
 
@@ -268,14 +321,14 @@ fun IslandOverlayView(
     }
 
     val contentScale by transition.animateFloat(
-        transitionSpec = { sizeSpecFloat },
+        transitionSpec = { if (targetState) expandSpecFloat else sizeSpecFloat },
         label = "contentScale"
     ) {
         if (it) 1f else 0.95f
     }
 
     val contentSlideY by transition.animateDp(
-        transitionSpec = { sizeSpec },
+        transitionSpec = { if (targetState) expandSpec else sizeSpec },
         label = "contentSlideY"
     ) {
         if (it) 0.dp else (-6).dp
@@ -311,28 +364,15 @@ fun IslandOverlayView(
         }
     }
 
-    // Dual Pill (Multi-Tasking Split Island) Detection:
-    // When 2 or more notifications exist (e.g. Music + Notification/Timer/Call), split into Main Pill + Secondary Bubble
-    val secondaryNotification = if (!settings.enableNotchMode && notifications.size >= 2) {
-        notifications.firstOrNull { it.key != activeNotification?.key }
-    } else null
-    val secondaryIndex = if (secondaryNotification != null) {
-        notifications.indexOfFirst { it.key == secondaryNotification.key }
-    } else -1
-    val tertiaryNotification = if (!settings.enableNotchMode && notifications.size >= 3) {
-        notifications.firstOrNull {
-            it.key != activeNotification?.key && it.key != secondaryNotification?.key
-        }
-    } else null
-    val tertiaryIndex = if (tertiaryNotification != null) {
-        notifications.indexOfFirst { it.key == tertiaryNotification.key }
-    } else -1
-    val isSplitMode = if (settings.enableNotchMode) false else secondaryNotification != null
+    // The secondary bubble is Mochi's home, always: every notification lives on the main pill.
+    // (Tapping him selects his desk and opens the tasks.)
+    val isSplitMode = mochiSecondary
     val secondaryIsPill = compactShapes.singleOrNull() == CompactNotificationShape.MiniPill
-    val showTertiaryPill = compactShapes.size == 2 && tertiaryNotification != null
 
     val secondaryAlpha by animateFloatAsState(
-        targetValue = if (isSplitMode && !isHiding) 1f else 0f,
+        // Expanded on music, the rider Mochi already surfs the seekbar: the bubble fades instead
+        // of twinning him. The existing 180 ms tween makes the handoff a glide, not a pop.
+        targetValue = if (isSplitMode && !isHiding && !(expanded && activeMode == IslandMode.Music)) 1f else 0f,
         animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
         label = "secondaryAlpha"
     )
@@ -358,6 +398,15 @@ fun IslandOverlayView(
         animationSpec = spring(dampingRatio = 0.75f, stiffness = 520f),
         label = "secondaryBubbleCorner"
     )
+    val tertiaryNotification = if (!settings.enableNotchMode && notifications.size >= 3) {
+        notifications.firstOrNull {
+            it.key != activeNotification?.key && it.key != IslandDesk.KEY
+        }
+    } else null
+    val tertiaryIndex = if (tertiaryNotification != null) {
+        notifications.indexOfFirst { it.key == tertiaryNotification.key }
+    } else -1
+    val showTertiaryPill = notifications.size >= 3 && tertiaryNotification != null
     val tertiaryAlpha by animateFloatAsState(
         targetValue = if (showTertiaryPill && !isHiding) 1f else 0f,
         animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
@@ -447,19 +496,45 @@ fun IslandOverlayView(
             RoundedCornerShape(safeRadius)
         }
 
+        // Claude's aura: while he works on the laptop, a ring of his orange breathes around the
+        // main pill (collapsed only — expanded, his card speaks for itself). The breathing clock
+        // lives only inside this branch, so the pill costs nothing the rest of the time.
+        val auraModifier = if (!expanded && activeMode == IslandMode.Agent && !isHiding) {
+            val breath by rememberInfiniteTransition(label = "aura").animateFloat(
+                initialValue = 0.28f,
+                targetValue = 0.68f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(durationMillis = 1600, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "auraBreath"
+            )
+            Modifier.border(
+                width = 2.dp,
+                color = com.agupta07505.smartisland.coucou.ui.ClaudeOrange.copy(alpha = breath),
+                shape = mainShape
+            )
+        } else {
+            Modifier
+        }
+
         // Inner Box: The actual visible pill container, managing the black background shape and size animations
         Box(
             modifier = Modifier
                 .width(safeWidth)
                 .height(safeHeight)
                 .graphicsLayer {
+                    // Guard the horizontal slide-in: an unanchored 0.95 scale on a
+                    // top-center-aligned box makes a near-zero-width pill drift
+                    // left/right at the very start/end of the morph (reads as flicker).
+                    val widthPx = size.width
                     translationX = animatedXOffset.toPx() + (if (!currentExpanded) pillDragOffsetX else 0f)
+                    scaleX = if (widthPx > 0f) switchScaleAnim.value else 1f
+                    scaleY = if (widthPx > 0f) switchScaleAnim.value else 1f
                     translationY = yOffset.toPx() + dragOffset
-                    scaleX = switchScaleAnim.value
-                    scaleY = switchScaleAnim.value
                 }
                 .then(
-                    if (settings.enableShadow && settings.shadowElevation > 0f && !isHiding) {
+                    if (settings.enableShadow && settings.shadowElevation > 0f && !isHiding && safeWidth > 0.dp) {
                         val activeMainShadow = if (currentExpanded) {
                             (settings.shadowElevation * 1.5f).dp
                         } else {
@@ -475,7 +550,8 @@ fun IslandOverlayView(
                     } else Modifier
                 )
                 .clip(mainShape)
-                .background(pillBackgroundColor.copy(alpha = settings.opacity))
+                .background(pillTint.copy(alpha = settings.opacity))
+                .then(auraModifier)
                 .pointerInput(displayMetrics.density, isInputActive) {
                     if (isInputActive) return@pointerInput
                     awaitEachGesture {
@@ -792,6 +868,22 @@ fun IslandOverlayView(
                 },
             contentAlignment = Alignment.TopCenter
         ) {
+            // Ambient cover glow: the album colour lit from the pill's center while music plays.
+            // Drawn first (behind everything), luminous inside fading to the base tint at the rim —
+            // inverted would read as a dark blotch, because the pill itself is translucent.
+            // It breathes off the same cover colour that tints the bars and the background.
+            if (musicCoverTint != null && !isHiding) {
+                Box(
+                    Modifier.matchParentSize().background(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                musicCoverTint.copy(alpha = 0.30f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+                )
+            }
             // Collapsed content layer (pinned to fixed pill bounds at top-center, cancelling yOffset)
             if (collapsedAlpha > 0f) {
                 Box(
@@ -803,12 +895,25 @@ fun IslandOverlayView(
                             alpha = collapsedAlpha
                         }
                 ) {
-                    IslandCollapsedContent(
-                        mode = activeMode,
-                        notification = activeNotification,
-                        collapsedAlpha = collapsedAlpha,
-                        settings = settings
-                    )
+                    // Rotating notifications crossfades instead of snapping: the outgoing fades fast
+                    // while the incoming blooms in slightly small. Keyed by key (not index), so a
+                    // reorder mid-flight never shows the wrong card.
+                    AnimatedContent(
+                        targetState = activeNotification?.key,
+                        transitionSpec = {
+                            (fadeIn(tween(180)) + scaleIn(initialScale = 0.94f, animationSpec = tween(180)))
+                                .togetherWith(fadeOut(tween(140)))
+                        },
+                        label = "mainSwitch"
+                    ) { shownKey ->
+                        val shown = notifications.firstOrNull { it.key == shownKey }
+                        IslandCollapsedContent(
+                            mode = shown?.mode ?: IslandMode.Empty,
+                            notification = shown,
+                            collapsedAlpha = collapsedAlpha,
+                            settings = settings
+                        )
+                    }
                 }
             }
 
@@ -843,11 +948,36 @@ fun IslandOverlayView(
                     )
                 }
             }
+
+            // The unlock padlock: one classic opening over the main pill per unlock, then gone.
+            // (Mochi says hello beside it from his bubble.) Keyed by unlock so every unlock replays.
+            val unlockMs = com.agupta07505.smartisland.coucou.ui.rememberUnlockMs()
+            var showUnlock by remember { mutableStateOf(false) }
+            LaunchedEffect(unlockMs) {
+                if (unlockMs > 0) {
+                    showUnlock = true
+                    kotlinx.coroutines.delay(com.agupta07505.smartisland.coucou.ui.LOCK_BADGE_MS)
+                    showUnlock = false
+                }
+            }
+            if (showUnlock && !isHiding) {
+                key(unlockMs) {
+                    androidx.compose.foundation.layout.Box(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .width(56.dp)
+                            .height(56.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        com.agupta07505.smartisland.coucou.ui.LockOpeningBadge()
+                    }
+                }
+            }
         }
 
-        // Collapsed: secondary circle. Expanded with 2: the same item morphs
-        // into a full-size pill. Expanded with 3+: it stays the circle on the right.
-        if (!settings.enableNotchMode && secondaryAlpha > 0f && secondaryNotification != null) {
+        // Mochi's home: always the secondary bubble. Tapping him opens his desk (tasks).
+        // Collapsed it is his circle; expanded it grows into his mini-pill with the count.
+        if (mochiSecondary && secondaryAlpha > 0f) {
             Box(
                 modifier = Modifier
                     .absoluteOffset {
@@ -880,8 +1010,8 @@ fun IslandOverlayView(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
                     ) {
-                        if (secondaryIndex >= 0) {
-                            onPageSelected(secondaryIndex)
+                        if (deskIndex >= 0) {
+                            onPageSelected(deskIndex)
                         }
                         if (!currentExpanded) {
                             currentOnToggle()
@@ -895,10 +1025,8 @@ fun IslandOverlayView(
                         .graphicsLayer { alpha = 1f - secondaryPillProgress },
                     contentAlignment = Alignment.Center
                 ) {
-                    SecondaryBubbleContent(
-                        notification = secondaryNotification,
-                        settings = settings
-                    )
+                    // lookDir points at the main pill: right when the bubble sits left and back.
+                    com.agupta07505.smartisland.coucou.ui.MochiBubble(lookDir = if (isCircleLeft) 1f else -1f)
                 }
                 Box(
                     modifier = Modifier
@@ -907,12 +1035,7 @@ fun IslandOverlayView(
                         .graphicsLayer { alpha = secondaryPillProgress },
                     contentAlignment = Alignment.Center
                 ) {
-                    IslandCollapsedContent(
-                        mode = secondaryNotification.mode,
-                        notification = secondaryNotification,
-                        collapsedAlpha = 1f,
-                        settings = settings
-                    )
+                    com.agupta07505.smartisland.coucou.ui.MochiBubblePill(lookDir = if (isCircleLeft) 1f else -1f)
                 }
             }
         }
@@ -966,110 +1089,6 @@ fun IslandOverlayView(
                     settings = settings
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun SecondaryBubbleContent(
-    notification: IslandNotification,
-    settings: SmartIslandSettings
-) {
-    when (notification.mode) {
-        IslandMode.Bluetooth -> {
-            BluetoothCollapsedRight(
-                notification = notification,
-                settings = settings
-            )
-        }
-        IslandMode.Flashlight -> {
-            Box(
-                modifier = Modifier
-                    .size(20.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFFF59E0B).copy(alpha = 0.25f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Rounded.FlashlightOn,
-                    contentDescription = "Flashlight",
-                    tint = Color(0xFFFACC15),
-                    modifier = Modifier.size(12.dp)
-                )
-            }
-        }
-        IslandMode.Hotspot -> {
-            HotspotCollapsedGlyph(notification = notification, settings = settings)
-        }
-        IslandMode.Battery -> {
-            BatteryCollapsedGlyph(notification = notification, settings = settings)
-        }
-        IslandMode.LiveActivity -> {
-            LiveActivityCollapsedGlyph(notification = notification, settings = settings)
-        }
-        IslandMode.Navigation -> {
-            NavigationCollapsedGlyph(notification = notification, settings = settings)
-        }
-        IslandMode.IncomingCall -> {
-            val icon = notification.largeIcon ?: notification.icon
-            if (icon != null) {
-                Image(
-                    bitmap = icon.asImageBitmap(),
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(20.dp)
-                        .clip(CircleShape)
-                )
-            } else {
-                Icon(
-                    Icons.Rounded.Call,
-                    contentDescription = null,
-                    tint = Color(settings.callColor),
-                    modifier = Modifier.size(14.dp)
-                )
-            }
-        }
-        IslandMode.Music -> {
-            val artwork = notification.largeIcon ?: notification.icon
-            if (artwork != null) {
-                Image(
-                    bitmap = artwork.asImageBitmap(),
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(20.dp)
-                        .clip(CircleShape)
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .size(20.dp)
-                        .clip(CircleShape)
-                        .background(Color(settings.musicVisualizerColor)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Rounded.MusicNote,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(12.dp)
-                    )
-                }
-            }
-        }
-        IslandMode.ScreenRecording -> {
-            ScreenRecordingCollapsedGlyph(settings = settings)
-        }
-        IslandMode.Timer -> {
-            TimerCollapsedGlyph(notification = notification, settings = settings)
-        }
-        IslandMode.Stopwatch -> {
-            StopwatchCollapsedGlyph(notification = notification, settings = settings)
-        }
-        IslandMode.Reminder -> com.agupta07505.smartisland.coucou.ui.ReminderCollapsedGlyph()
-        IslandMode.Desk -> com.agupta07505.smartisland.coucou.ui.DeskCollapsedGlyph(notification)
-        IslandMode.Agent, IslandMode.Approval, IslandMode.Question -> com.agupta07505.smartisland.coucou.ui.AgentCollapsedGlyph(notification)
-        IslandMode.Notification, IslandMode.DownloadUpload, IslandMode.Empty -> {
-            NotificationGlyph(notification = notification, settings = settings)
         }
     }
 }
@@ -1172,6 +1191,7 @@ internal fun defaultEstimatedHeightForMode(mode: IslandMode?): Dp {
         IslandMode.Reminder -> 125.dp
         IslandMode.Desk -> 280.dp
         IslandMode.Agent -> 130.dp
+        IslandMode.JinxMsg -> 140.dp
         IslandMode.Approval -> 175.dp
         IslandMode.Question -> 210.dp
         IslandMode.Empty, null -> 280.dp

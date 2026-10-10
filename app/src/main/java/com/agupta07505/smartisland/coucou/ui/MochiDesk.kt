@@ -75,6 +75,8 @@ fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modif
     var smileUntil by remember { mutableLongStateOf(0L) }
     var adding by remember { mutableStateOf(false) }
     var input by remember { mutableStateOf("") }
+    var picking by remember { mutableStateOf(false) }
+    val whenState = rememberWhenState()
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     val focus = remember { FocusRequester() }
 
@@ -100,20 +102,47 @@ fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modif
 
     val open = tasks.filter { !it.done }.sortedWith(compareBy({ it.remindAt ?: Long.MAX_VALUE }, { it.created }))
     val overdue = open.count { it.remindAt != null && it.remindAt * 1000 < now }
+    val scene = rememberMochiScene()
+    val celebrating = rememberCelebration(open.size)
+    // Same attention order as his bubble (no look direction here: the desk fills the island, so
+    // the stare stays centered). Music is ambience: it only gets him dancing when nothing needs
+    // him; at night he naps through calm tasks.
     val mood = when {
+        celebrating -> MochiMood.Celebrating
         smileUntil > now -> MochiMood.Happy
         overdue > 0 -> MochiMood.Alert
+        scene.batteryLow -> MochiMood.Tired
+        scene.greeted -> MochiMood.Happy
+        scene.surprised -> MochiMood.Surprised
+        scene.glancing -> MochiMood.Glance
+        scene.musicPlaying -> MochiMood.Dancing
+        MochiReactions.isNight(now) -> MochiMood.Sleepy
         open.isEmpty() -> MochiMood.Sleepy
         else -> MochiMood.Idle
     }
-    val tint = if (overdue > 0) ReminderAmber else MochiCoral
+    val tint = if (overdue > 0) ReminderAmber else MochiEmerald
 
+    // The calendar choice rides along with the sentence: the day picked wins, the sentence's
+    // time of day is kept ("viernes a las 17:30"). Both are cleared after adding, so the next
+    // task starts clean instead of inheriting yesterday's day.
     fun submit() {
         touchIsland(context)
         val text = input.trim()
-        if (text.isNotEmpty()) runCatching { CoucouTasks.add(context, text) }
+        if (text.isNotEmpty()) {
+            runCatching { CoucouTasks.add(context, text, pickedDay = whenState.dayStart, pickedHour = whenState.hour) }
+        }
         input = ""
         adding = false
+        picking = false
+        whenState.reset()
+        onReplyStateChanged(false)
+    }
+
+    fun cancel() {
+        input = ""
+        adding = false
+        picking = false
+        whenState.reset()
         onReplyStateChanged(false)
     }
 
@@ -133,7 +162,11 @@ fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modif
                 )
                 val next = open.firstOrNull { it.remindAt != null && it.remindAt * 1000 >= now }
                 Text(
-                    next?.let { "next · ${time(it.remindAt!!)}  ${it.title}" } ?: if (open.isEmpty()) "Mochi is napping" else "nothing timed",
+                    next?.let { "next · ${time(it.remindAt!!)}  ${it.title}" } ?: when {
+                        mood == MochiMood.Dancing -> "♪ dancing"
+                        open.isEmpty() -> "Mochi is napping"
+                        else -> "nothing timed"
+                    },
                     color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }
@@ -141,6 +174,7 @@ fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modif
 
         for (t in open.take(4)) TaskRow(t) {
             touchIsland(context)
+            Haptics.tap(context)
             CoucouTasks.setDone(context, t.id, true)
             smileUntil = System.currentTimeMillis() + 1600
             now = System.currentTimeMillis()
@@ -151,33 +185,40 @@ fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modif
                     .clickable { touchIsland(context); adding = true; onReplyStateChanged(true) }.padding(horizontal = 14.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("＋", color = MochiCoral, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text("＋", color = MochiEmerald, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.width(8.dp))
                 Text("Add a task", color = Color.White.copy(alpha = 0.55f), fontSize = 13.sp)
             }
         } else {
-            Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(50)).border(1.dp, MochiCoral.copy(alpha = 0.6f), RoundedCornerShape(50))
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(Modifier.weight(1f)) {
-                    if (input.isEmpty()) Text("llamar a mamá a las 17:30…", color = Color.White.copy(alpha = 0.35f), fontSize = 13.sp, maxLines = 1)
-                    BasicTextField(
-                        value = input,
-                        onValueChange = { input = it },
-                        singleLine = true,
-                        textStyle = TextStyle(color = Color.White, fontSize = 13.sp),
-                        cursorBrush = SolidColor(MochiCoral),
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                        keyboardActions = KeyboardActions(onDone = { submit() }),
-                        modifier = Modifier.fillMaxWidth().focusRequester(focus),
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(50)).border(1.dp, MochiEmerald.copy(alpha = 0.6f), RoundedCornerShape(50))
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.weight(1f)) {
+                        if (input.isEmpty()) Text("llamar a mamá a las 17:30…", color = Color.White.copy(alpha = 0.35f), fontSize = 13.sp, maxLines = 1)
+                        BasicTextField(
+                            value = input,
+                            onValueChange = { input = it },
+                            singleLine = true,
+                            textStyle = TextStyle(color = Color.White, fontSize = 13.sp),
+                            cursorBrush = SolidColor(MochiEmerald),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { submit() }),
+                            modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                        )
+                    }
+                    WhenCalendarButton(picked = whenState.dayStart != null) {
+                        touchIsland(context)
+                        picking = !picking
+                    }
+                    Icon(
+                        Icons.Rounded.Close, "Cancel", tint = Color.White.copy(alpha = 0.5f),
+                        modifier = Modifier.size(20.dp).clip(CircleShape).clickable { touchIsland(context); cancel() },
                     )
                 }
-                Icon(
-                    Icons.Rounded.Close, "Cancel", tint = Color.White.copy(alpha = 0.5f),
-                    modifier = Modifier.size(20.dp).clip(CircleShape).clickable { input = ""; adding = false; onReplyStateChanged(false) },
-                )
+                if (picking) WhenPickerPanel(whenState)
             }
         }
     }

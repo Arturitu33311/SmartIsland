@@ -52,8 +52,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.agupta07505.smartisland.coucou.phone.PhoneSetupActivity
 import com.agupta07505.smartisland.coucou.phone.PhoneSettings.jinxSync
+import com.agupta07505.smartisland.coucou.ui.Haptics
 import com.agupta07505.smartisland.coucou.ui.MochiGlyph
 import com.agupta07505.smartisland.coucou.ui.MochiMood
+import com.agupta07505.smartisland.coucou.ui.WhenCalendarButton
+import com.agupta07505.smartisland.coucou.ui.WhenPickerPanel
+import com.agupta07505.smartisland.coucou.ui.rememberWhenState
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -77,6 +81,8 @@ private fun TasksScreen() {
     var tasks by remember { mutableStateOf(CoucouTasks.list(context)) }
     var input by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    var picking by remember { mutableStateOf(false) }
+    val whenState = rememberWhenState()
     val jinxOn = context.jinxSync
     val outcome by CoucouRuntime.jinx.collectAsState()
     // The sync may have changed the list (she closed one, a task was handed over): show it as it is.
@@ -86,10 +92,12 @@ private fun TasksScreen() {
         CoucouRuntime.kick()
     }
 
+    // The picked day rides along exactly like in the island: the button only opens the inline
+    // panel (no dialog), and a successful add clears the choice.
     fun add() {
         if (input.isBlank()) return
-        runCatching { CoucouTasks.add(context, input) }
-            .onSuccess { tasks = it; input = ""; error = null }
+        runCatching { CoucouTasks.add(context, input, pickedDay = whenState.dayStart, pickedHour = whenState.hour) }
+            .onSuccess { tasks = it; input = ""; error = null; picking = false; whenState.reset() }
             .onFailure { error = it.message }
     }
 
@@ -109,15 +117,22 @@ private fun TasksScreen() {
             }
         }
         Spacer(Modifier.padding(6.dp))
-        OutlinedTextField(
-            value = input,
-            onValueChange = { input = it },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            placeholder = { Text("llamar a mamá a las 17:30 · en 20 min", maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { add() }),
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = input,
+                onValueChange = { input = it },
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+                placeholder = { Text("llamar a mamá a las 17:30 · en 20 min", maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { add() }),
+            )
+            WhenCalendarButton(picked = whenState.dayStart != null) { picking = !picking }
+        }
+        if (picking) {
+            Spacer(Modifier.padding(4.dp))
+            WhenPickerPanel(whenState)
+        }
         error?.let { Text(it, color = Color(0xFFF5A524), fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp)) }
         Spacer(Modifier.padding(4.dp))
         LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -125,7 +140,7 @@ private fun TasksScreen() {
             val done = tasks.filter { it.done }.sortedByDescending { it.completedAt ?: 0 }
             items(open + done, key = { it.id }) { t ->
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = t.done, onCheckedChange = { tasks = CoucouTasks.setDone(context, t.id, it) })
+                    Checkbox(checked = t.done, onCheckedChange = { tasks = CoucouTasks.setDone(context, t.id, it).also { Haptics.tap(context) } })
                     Column(Modifier.weight(1f)) {
                         Text(
                             t.title,

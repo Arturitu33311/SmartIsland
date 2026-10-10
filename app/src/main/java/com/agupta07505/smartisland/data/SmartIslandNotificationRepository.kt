@@ -331,6 +331,11 @@ class SmartIslandNotificationRepository : INotificationRepository {
                 key = "demo_desk", packageName = "com.agupta07505.smartisland", appName = "Coucou",
                 title = "3 to do", text = "Mochi", timeMillis = System.currentTimeMillis(), mode = IslandMode.Desk, progress = 3
             )
+            IslandMode.JinxMsg -> IslandNotification(
+                key = "demo_jinxmsg", packageName = "com.agupta07505.smartisland", appName = "Jinx",
+                title = "Jinx", text = "Ya es en serio: OpenRouter está por agotarse", timeMillis = System.currentTimeMillis(),
+                mode = IslandMode.JinxMsg, category = "mochi:Alert:alert"
+            )
             IslandMode.Empty -> null
         }
         if (demoNotification != null) {

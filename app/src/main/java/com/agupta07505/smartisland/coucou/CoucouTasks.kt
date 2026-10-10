@@ -45,13 +45,22 @@ object CoucouTasks {
     fun list(context: Context) = TaskStore.of(context).load()
 
     /**
-     * Adds a task; the sentence may carry its own time ("llamar a mamá a las 17:30"). With the sync on,
-     * a new task is also Jinx's (its chip can keep it only here).
+     * Adds a task; the sentence may carry its own time ("llamar a mamá a las 17:30"). A day picked
+     * on the calendar wins over the sentence's day, keeping its time of day ("viernes a las 17:30"
+     * → Friday 17:30; a bare Friday → [pickedHour]:00). With the sync on, a new task is also Jinx's
+     * (its chip can keep it only here).
      */
-    fun add(context: Context, text: String, jinx: Boolean = context.jinxSync): List<CoucouTask> {
+    fun add(
+        context: Context,
+        text: String,
+        jinx: Boolean = context.jinxSync,
+        pickedDay: Long? = null,
+        pickedHour: Int = 9,
+    ): List<CoucouTask> {
         val parsed = TaskParser.parseWhen(text, nowSec(), ::offset)
+        val at = if (pickedDay != null) TaskParser.withDay(pickedDay, parsed.whenSec, pickedHour, ::offset) else parsed.whenSec
         val list = TaskStore.of(context).update {
-            TaskLogic.add(it, parsed.title, parsed.whenSec, nowSec(), UUID.randomUUID().toString(), jinx)
+            TaskLogic.add(it, parsed.title, at, nowSec(), UUID.randomUUID().toString(), jinx)
         }
         ReminderScheduler.rearm(context)
         changed(context)
