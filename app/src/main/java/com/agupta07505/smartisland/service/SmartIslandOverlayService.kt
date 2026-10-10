@@ -151,6 +151,18 @@ class SmartIslandOverlayService : AccessibilityService() {
     // Wrapped: an uncaught throw here makes Android auto-disable the
     // AccessibilityService, which is exactly the "turns off by itself" symptom.
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        // Using the phone anywhere counts as being at the phone (a touch, a click, a scroll, typing, an
+        // app opening): that is what makes Mochi follow the person here from the laptop.
+        when (event?.eventType) {
+            AccessibilityEvent.TYPE_TOUCH_INTERACTION_START,
+            AccessibilityEvent.TYPE_VIEW_CLICKED,
+            AccessibilityEvent.TYPE_VIEW_LONG_CLICKED,
+            AccessibilityEvent.TYPE_VIEW_SCROLLED,
+            AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ->
+                com.agupta07505.smartisland.coucou.presence.DeviceActivity.noteInteraction()
+            else -> Unit
+        }
         runCatchingLogged(TAG, "onAccessibilityEvent failed") {
             if (destroyed || !::viewModel.isInitialized) return@runCatchingLogged
             val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager

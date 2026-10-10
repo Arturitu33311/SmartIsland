@@ -147,7 +147,17 @@ object DeviceActivity {
         val now = System.currentTimeMillis()
         val p = peer
         val seen = if (p != null) listOf(Seen(p.beat, now - p.at)) else emptyList()
-        val winner = Arbiter.decide(myBeat(app), seen, previous)
+        val me = myBeat(app)
+        val winner = Arbiter.decide(me, seen, previous)
+        if (winner != previous) {
+            // One line per change of who has Mochi: what each side said, so a migration that does not
+            // happen can be read off the log (adb logcat -s Presence).
+            android.util.Log.d(
+                "Presence",
+                "winner=$winner (was $previous) me[idle=${me.idleS} screen=${me.screenOn} srv=${me.serverOk}/${me.serverActive}] " +
+                    (p?.let { "peer[idle=${it.beat.idleS} age=${now - it.at}ms screen=${it.beat.screenOn} srv=${it.beat.serverOk}/${it.beat.serverActive}]" } ?: "peer[none]"),
+            )
+        }
         previous = winner
         _active.value = winner == Arbiter.PHONE
         val alive = p != null && now - p.at <= Arbiter.FRESH_MS
