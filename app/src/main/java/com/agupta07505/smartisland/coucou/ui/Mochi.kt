@@ -42,7 +42,7 @@ import kotlin.math.sin
 /** What Mochi feels. Alert/Happy/Listening/Sleepy are his desk states; Surprised, Glance and
  * Dancing are his reactions to the island (news, then looking at it, music); Tired is low
  * battery and Celebrating is an emptied task list. */
-enum class MochiMood { Idle, Alert, Happy, Listening, Sleepy, Surprised, Glance, Dancing, Tired, Celebrating, Working }
+enum class MochiMood { Idle, Alert, Happy, Listening, Sleepy, Surprised, Glance, Dancing, Tired, Celebrating, Working, Error }
 
 /** The blue of Claude Code's working dots on the laptop's Mochi (engine.ts C.working). */
 private val WorkingBlue = Color(0xFF4F9BFF)
@@ -246,6 +246,11 @@ fun MochiGlyph(
                     val ry = (rx * 0.55f).coerceAtLeast(0.5f) * (0.35f + 0.65f * blink)
                     drawOval(ink, topLeft = Offset(cx - rx, eyeY - ry), size = Size(rx * 2, ry * 2))
                 }
+                mood == MochiMood.Error -> {
+                    // Flat eyes: a tool failed (the laptop's Mochi does the same).
+                    val r = w * 0.075f
+                    drawLine(ink, Offset(cx - r, eyeY), Offset(cx + r, eyeY), strokeWidth = w * 0.05f, cap = StrokeCap.Round)
+                }
                 glancing -> {
                     // Eyes slid toward the news, wide and blinking: he is watching the main pill.
                     val rx = w * 0.062f
@@ -258,6 +263,10 @@ fun MochiGlyph(
                     drawOval(ink, topLeft = Offset(cx - rx, eyeY - ry), size = Size(rx * 2, ry * 2))
                 }
             }
+        }
+        if (mood == MochiMood.Error) {
+            // A red dot over his head, like the laptop's error badge.
+            drawCircle(Color(0xFFEF4444), radius = w * 0.06f, center = Offset(w * 0.5f, top - h * 0.02f))
         }
         if (mood == MochiMood.Working) {
             // Three dots over his head lighting up in turn: Claude Code is working (same badge as the laptop's Mochi).

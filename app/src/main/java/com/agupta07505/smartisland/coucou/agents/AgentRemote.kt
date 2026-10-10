@@ -31,6 +31,8 @@ data class AgentUi(
     val detail: String = "",
     val sessions: List<SessionInfo> = emptyList(),
     val pending: List<Pending> = emptyList(),
+    /** When a tool of Claude Code last failed (unix ms, 0: never). */
+    val failedAt: Long = 0L,
 ) {
     enum class Status { Off, Connecting, Connected, Reconnecting, LaptopClosed }
 }
@@ -87,7 +89,7 @@ class AgentRemote(private val context: Context, private val scope: CoroutineScop
 
     private fun publish(status: AgentUi.Status, detail: String = "") {
         val now = System.currentTimeMillis()
-        _ui.value = AgentUi(status, detail, model.view(now), model.pending.values.sortedBy { it.receivedAt })
+        _ui.value = AgentUi(status, detail, model.view(now), model.pending.values.sortedBy { it.receivedAt }, model.lastFailureAt)
     }
 
     private suspend fun loop() {
@@ -138,6 +140,7 @@ class AgentRemote(private val context: Context, private val scope: CoroutineScop
         var lastBeat = 0L
         var lastMusic = false
         var lastNews = false
+        var lastIdle = 0L
         // A new link: the lists meet first thing, whatever either side did while they were apart.
         tasksDirty = true
         try {
@@ -160,11 +163,16 @@ class AgentRemote(private val context: Context, private val scope: CoroutineScop
                 // sees changes (a song starting, news arriving), so the other Mochi reacts in time.
                 val music = MochiReactions.isMusicPlaying(notificationRepo.notifications.value)
                 val news = MochiReactions.freshArrival(notificationRepo.notifications.value, now, NEWS_BEAT_MS)
-                if (now - lastBeat > BEAT_MS || music != lastMusic || news != lastNews) {
-                    stream.output.write((RemoteProtocol.peer(DeviceActivity.myBeat(context), music, news) + "\n").toByteArray())
+                val mine = DeviceActivity.myBeat(context)
+                // Touched since the last beat (its idle fell): the laptop hears it now, so Mochi follows
+                // the person at once instead of at the next beat.
+                val touched = mine.idleS + 1 < lastIdle
+                if (now - lastBeat > BEAT_MS || music != lastMusic || news != lastNews || touched) {
+                    stream.output.write((RemoteProtocol.peer(mine, music, news) + "\n").toByteArray())
                     stream.output.flush()
                     lastBeat = now; lastMusic = music; lastNews = news
                 }
+                lastIdle = mine.idleS
                 if (now - lastHeard > 50_000) return "no answer from the laptop"
                 while (true) {
                     val out = outbox.poll() ?: break

@@ -148,6 +148,9 @@ class AgentModel {
     val sessions = LinkedHashMap<String, SessionInfo>()
     val pending = LinkedHashMap<String, Pending>()
 
+    /** When a tool of Claude Code last failed (0: never): Mochi winces for a moment, as on the laptop. */
+    @Volatile var lastFailureAt = 0L
+
     /** How long without news before a session that was working is shown as idle. */
     companion object {
         const val STALE_MS = 90_000L
@@ -175,6 +178,7 @@ class AgentModel {
 
     private fun event(e: RemoteMsg.Event, now: Long) {
         if (e.session.isEmpty()) return
+        if (e.event == "PostToolUseFailure") lastFailureAt = now
         val old = sessions[e.session]
         val project = e.project.ifEmpty { old?.project ?: "" }
         when (e.event) {

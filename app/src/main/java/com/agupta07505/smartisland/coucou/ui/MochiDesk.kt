@@ -115,6 +115,7 @@ fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modif
         scene.greeted -> MochiMood.Happy
         scene.surprised -> MochiMood.Surprised
         scene.glancing -> MochiMood.Glance
+        scene.errored -> MochiMood.Error
         scene.finished -> MochiMood.Happy
         scene.working -> MochiMood.Working
         scene.musicPlaying -> MochiMood.Dancing

@@ -47,6 +47,8 @@ data class MochiScene(
     val working: Boolean = false,
     /** Claude Code just finished what it was doing: he is glad (a short happy moment). */
     val finished: Boolean = false,
+    /** A tool of Claude Code just failed: flat eyes and a red dot for a moment (as on the laptop). */
+    val errored: Boolean = false,
 )
 
 /**
@@ -72,6 +74,9 @@ object MochiReactions {
 
     /** How long he stays glad after Claude Code finishes. */
     const val FINISHED_MS = 3_000L
+
+    /** How long a failed tool shows on his face. */
+    const val ERROR_MS = 3_000L
 
     fun isMusicPlaying(notifications: List<IslandNotification>): Boolean =
         notifications.any { it.mode == IslandMode.Music && it.mediaIsPlaying }
@@ -141,8 +146,10 @@ object MochiReactions {
         peerMusic: Boolean = false,
         working: Boolean = false,
         finishedUntil: Long = 0L,
+        errorUntil: Long = 0L,
     ): MochiScene =
         MochiScene(
+            errored = errorUntil > now,
             // The other device's music counts too: whichever one Mochi is on, he dances to it.
             musicPlaying = isMusicPlaying(notifications) || peerMusic,
             working = working,
@@ -256,6 +263,19 @@ fun rememberMochiScene(): MochiScene {
             finishedUntil = 0L
         }
     }
+    // A failed tool: he winces for a moment (a failure older than a few seconds is not news).
+    var errorUntil by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(agents.failedAt) {
+        val age = System.currentTimeMillis() - agents.failedAt
+        if (agents.failedAt > 0 && age < MochiReactions.ERROR_MS) errorUntil = agents.failedAt + MochiReactions.ERROR_MS
+    }
+    LaunchedEffect(errorUntil) {
+        val remaining = errorUntil - System.currentTimeMillis()
+        if (remaining > 0) {
+            delay(remaining)
+            errorUntil = 0L
+        }
+    }
     val peerMusic by DeviceActivity.peerMusic.collectAsState()
     // Every unlock re-opens the hello (same moment the padlock badge shows)…
     val unlockMs = rememberUnlockMs()
@@ -272,7 +292,7 @@ fun rememberMochiScene(): MochiScene {
     }
     return MochiReactions.scene(
         notifications, System.currentTimeMillis(), surprisedUntil, greetedUntil, glanceUntil, 0L,
-        peerMusic = peerMusic, working = working, finishedUntil = finishedUntil,
+        peerMusic = peerMusic, working = working, finishedUntil = finishedUntil, errorUntil = errorUntil,
     )
 }
 
