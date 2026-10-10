@@ -33,6 +33,14 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+/**
+ * What this device draws: everything on the one in use, and on the other everything but Coucou's own
+ * cards (Mochi, tasks, Claude Code, Jinx). Dropping them from the drawn list changes nothing about
+ * them: a request keeps its timeout and its answer.
+ */
+fun shownOnThisDevice(inUse: Boolean, list: List<IslandNotification>): List<IslandNotification> =
+    if (inUse) list else list.filterNot { it.mode.isCoucou }
+
 @OptIn(ExperimentalCoroutinesApi::class)
 class IslandViewModel(
     private val settingsRepo: SmartIslandSettingsRepository,
@@ -104,9 +112,7 @@ class IslandViewModel(
         selectedIndex.value = 0
     }
 
-    /** What this device draws: all of it on the active one, without Coucou's own cards on the other. */
-    private fun shownOn(mine: Boolean, list: List<IslandNotification>): List<IslandNotification> =
-        if (mine) list else list.filterNot { it.mode.isCoucou }
+    private fun shownOn(mine: Boolean, list: List<IslandNotification>) = shownOnThisDevice(mine, list)
 
     private fun arrange(list: List<IslandNotification>, fgPkg: String?, s: SmartIslandSettings): List<IslandNotification> =
         list.filterNot { notif ->
