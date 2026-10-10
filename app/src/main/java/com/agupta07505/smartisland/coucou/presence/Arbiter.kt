@@ -37,7 +37,7 @@ object Arbiter {
     const val FRESH_MS = 15_000L
 
     /** How much more recently another device must have been touched to take the island from the one that has it. */
-    const val HYSTERESIS_S = 8L
+    const val HYSTERESIS_S = 2L
 
     /** Who should show Mochi and Coucou: one of the ids in play. */
     fun decide(me: Beat, peers: List<Seen>, previous: String?): String {

@@ -179,7 +179,8 @@ class AgentRemote(private val context: Context, private val scope: CoroutineScop
                     val out = outbox.poll() ?: break
                     stream.output.write((out + "\n").toByteArray()); stream.output.flush()
                 }
-                val line = lines.poll(300, java.util.concurrent.TimeUnit.MILLISECONDS)
+                // Short, so a touch or a word from the laptop is acted on within a tenth of a second.
+                val line = lines.poll(100, java.util.concurrent.TimeUnit.MILLISECONDS)
                 if (line == null && !readerThread.isAlive && lines.isEmpty()) return "connection closed"
                 if (line == null) {
                     publishIfChanged()

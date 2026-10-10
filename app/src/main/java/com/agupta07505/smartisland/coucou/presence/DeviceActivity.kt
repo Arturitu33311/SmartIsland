@@ -63,7 +63,8 @@ object DeviceActivity {
 
     @Synchronized
     fun start(app: Context, scope: CoroutineScope) {
-        val pm = app.getSystemService(Context.POWER_SERVICE) as PowerManager
+        appContext = app.applicationContext
+        val pm =app.getSystemService(Context.POWER_SERVICE) as PowerManager
         if (screenOnTs == 0L && pm.isInteractive) screenOnTs = System.currentTimeMillis()
         if (receiver == null) {
             val r = object : BroadcastReceiver() {
@@ -97,9 +98,14 @@ object DeviceActivity {
         }
     }
 
-    /** The overlay calls this when the person touches the island. */
+    @Volatile private var appContext: Context? = null
+
+    /** The overlay and the accessibility service call this when the person uses the phone. */
     fun noteInteraction() {
+        // The first touch after a pause settles who has Mochi right now: no waiting for the clock.
+        val wasIdle = idleSeconds() >= 1
         lastTouchTs = System.currentTimeMillis()
+        if (wasIdle) appContext?.let { recompute(it) }
     }
 
     fun idleSeconds(): Long {
