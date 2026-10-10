@@ -11,6 +11,9 @@ import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -148,6 +151,18 @@ private fun pendingOf(notification: IslandNotification?, ui: com.agupta07505.sma
     return ui.pending.firstOrNull { it.id == id }
 }
 
+/** What has to be seen of a command before it can be allowed from the phone. */
+object ApprovalReview {
+    /** About three lines of 12 sp monospace on the island's width. */
+    const val FITS_CHARS = 100
+
+    /** The laptop sends at most this many characters of a command and ends a longer one with "…". */
+    private const val LAPTOP_LIMIT = 300
+
+    /** The laptop cut this command: its tail cannot be reviewed here, so it is not allowed from here. */
+    fun shortenedByLaptop(detail: String): Boolean = detail.length >= LAPTOP_LIMIT - 10 && detail.endsWith("…")
+}
+
 /** A permission request: what Claude Code wants to do, and Allow (with the fingerprint) or Deny. */
 @Composable
 fun ApprovalExpanded(notification: IslandNotification?, bottomPadding: Dp, onCollapse: () -> Unit) {
@@ -174,12 +189,30 @@ fun ApprovalExpanded(notification: IslandNotification?, bottomPadding: Dp, onCol
             }
         }
         Spacer(Modifier.size(6.dp))
+        // What is being allowed must be seen before it is allowed: a command that does not fit in three
+        // lines has to be opened (tap it) first, and one the laptop itself had to shorten is not allowed
+        // from here at all.
+        val full = p?.detail ?: notification?.text.orEmpty()
+        val tooLongToFit = full.length > ApprovalReview.FITS_CHARS || full.count { it == '\n' } >= 3
+        val shortenedByLaptop = ApprovalReview.shortenedByLaptop(full)
+        var read by remember(notification?.key) { mutableStateOf(false) }
         Text(
-            p?.detail ?: notification?.text.orEmpty(),
+            full,
             color = Color.White.copy(alpha = 0.78f), fontSize = 12.sp, fontFamily = FontFamily.Monospace,
-            maxLines = 3, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color.White.copy(alpha = 0.07f)).padding(8.dp),
+            maxLines = if (read) 12 else 3, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color.White.copy(alpha = 0.07f))
+                .then(if (tooLongToFit) Modifier.clickable { read = true } else Modifier)
+                .then(if (read) Modifier.heightIn(max = 110.dp).verticalScroll(rememberScrollState()) else Modifier)
+                .padding(8.dp),
         )
+        if (shortenedByLaptop) {
+            Text("Too long to check here: answer it in the terminal", color = ReminderAmber, fontSize = 11.sp, modifier = Modifier.padding(top = 3.dp))
+        } else if (tooLongToFit && !read) {
+            Text("Tap the command to read all of it before allowing", color = ReminderAmber, fontSize = 11.sp, modifier = Modifier.padding(top = 3.dp))
+        }
         message?.let { Text(it, color = Red, fontSize = 11.sp, modifier = Modifier.padding(top = 3.dp)) }
         Spacer(Modifier.size(8.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -191,11 +224,20 @@ fun ApprovalExpanded(notification: IslandNotification?, bottomPadding: Dp, onCol
             }
             Pill(if (armed) "Tap to allow" else "Allow", Modifier.weight(1f), Green) {
                 val req = p ?: return@Pill
+                if (shortenedByLaptop) {
+                    message = "Too long to check here: use Terminal"
+                    return@Pill
+                }
+                if (tooLongToFit && !read) {
+                    message = "Read the whole command first (tap it)"
+                    return@Pill
+                }
                 val send = {
                     if (!CoucouRuntime.sendToLaptop(RemoteProtocol.answer(req.id, "allow"))) message = "No link to the laptop" else onCollapse()
                 }
                 when {
-                    secure -> ConfirmActivity.ask(context, "Allow on the laptop?", "${req.tool}: ${req.detail.take(80)}") { ok -> if (ok) send() else message = "Not confirmed" }
+                    // The whole command (the laptop sends at most 300 characters), not a cut of it.
+                    secure -> ConfirmActivity.ask(context, "Allow on the laptop?", "${req.tool}: ${req.detail}") { ok -> if (ok) send() else message = "Not confirmed" }
                     armed -> send()
                     else -> armed = true
                 }

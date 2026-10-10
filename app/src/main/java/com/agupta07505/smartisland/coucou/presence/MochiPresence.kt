@@ -64,7 +64,29 @@ object PresenceNet {
     fun post(base: String, path: String, key: String, body: String, timeoutMs: Int = 8000): String? =
         request(base, path, key, body, timeoutMs)
 
+    /**
+     * The key rides in a header, so it only goes where it cannot be read on the way: https anywhere, or
+     * plain http inside a private network (the tailnet's 100.64.0.0/10, a LAN, loopback, the emulator's
+     * host). Plain http to a public name or address would show it to everyone on the path.
+     */
+    fun mayCarryKey(base: String): Boolean {
+        val m = Regex("""^(https?)://([^/:]+)""", RegexOption.IGNORE_CASE).find(base.trim()) ?: return false
+        if (m.groupValues[1].equals("https", ignoreCase = true)) return true
+        val host = m.groupValues[2].lowercase()
+        if (host == "localhost" || host.endsWith(".ts.net") || host.endsWith(".local")) return true
+        val o = host.split('.').map { it.toIntOrNull() ?: return false }
+        if (o.size != 4 || o.any { it !in 0..255 }) return false
+        return o[0] == 10 || o[0] == 127 ||
+            (o[0] == 192 && o[1] == 168) ||
+            (o[0] == 172 && o[1] in 16..31) ||
+            (o[0] == 100 && o[1] in 64..127)
+    }
+
     private fun request(base: String, path: String, key: String, body: String?, timeoutMs: Int): String? {
+        if (!mayCarryKey(base)) {
+            Log.w("MochiPresence", "not sending the key over plain http to a public address: use https or the tailnet")
+            return null
+        }
         var conn: HttpURLConnection? = null
         return try {
             conn = (URL(base.trimEnd('/') + path).openConnection() as HttpURLConnection).apply {
