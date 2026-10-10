@@ -118,6 +118,7 @@ fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modif
         scene.errored -> MochiMood.Error
         scene.finished -> MochiMood.Happy
         scene.searching -> MochiMood.Searching
+        scene.thinking -> MochiMood.Thinking
         scene.working -> MochiMood.Working
         scene.musicPlaying -> MochiMood.Dancing
         MochiReactions.isNight(now) -> MochiMood.Sleepy

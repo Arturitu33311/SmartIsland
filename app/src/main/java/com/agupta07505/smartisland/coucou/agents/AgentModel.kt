@@ -189,7 +189,10 @@ class AgentModel {
                 sessions[e.session] = SessionInfo(e.session, project, SessionState.Idle, old?.tool ?: "", old?.detail ?: "", now)
             "Notification" ->
                 sessions[e.session] = SessionInfo(e.session, project, SessionState.NeedsYou, "", e.message.ifEmpty { "needs you" }, now)
-            "PreToolUse", "PostToolUse", "PostToolUseFailure", "UserPromptSubmit", "SubagentStart" ->
+            // A new prompt: it is thinking until its first tool (no tool, no detail), as on the laptop.
+            "UserPromptSubmit" ->
+                sessions[e.session] = SessionInfo(e.session, project, SessionState.Working, "", "", now)
+            "PreToolUse", "PostToolUse", "PostToolUseFailure", "SubagentStart" ->
                 sessions[e.session] = SessionInfo(
                     e.session, project, SessionState.Working,
                     e.tool.ifEmpty { old?.tool ?: "" }, if (e.tool.isNotEmpty()) e.detail else (old?.detail ?: ""), now,

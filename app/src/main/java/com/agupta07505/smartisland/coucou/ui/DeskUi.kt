@@ -81,6 +81,7 @@ private fun bubbleMood(lookDir: Float): BubbleMood {
         scene.errored -> MochiMood.Error
         scene.finished -> MochiMood.Happy
         scene.searching -> MochiMood.Searching
+        scene.thinking -> MochiMood.Thinking
         scene.working -> MochiMood.Working
         scene.musicPlaying -> MochiMood.Dancing
         MochiReactions.isNight(now) -> MochiMood.Sleepy

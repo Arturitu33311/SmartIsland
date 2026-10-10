@@ -51,6 +51,8 @@ data class MochiScene(
     val errored: Boolean = false,
     /** What Claude Code is doing is a search (Grep, Glob, the web): indigo dots, as on the laptop. */
     val searching: Boolean = false,
+    /** Claude Code got a prompt and has not used a tool yet: violet dots, as on the laptop. */
+    val thinking: Boolean = false,
 )
 
 /**
@@ -154,10 +156,12 @@ object MochiReactions {
         errorUntil: Long = 0L,
         peerLimit: Boolean = false,
         searching: Boolean = false,
+        thinking: Boolean = false,
     ): MochiScene =
         MochiScene(
             errored = errorUntil > now,
             searching = working && searching,
+            thinking = working && thinking && !searching,
             // The other device's music counts too: whichever one Mochi is on, he dances to it.
             musicPlaying = isMusicPlaying(notifications) || peerMusic,
             working = working,
@@ -305,6 +309,7 @@ fun rememberMochiScene(): MochiScene {
         peerMusic = peerMusic, working = working, finishedUntil = finishedUntil, errorUntil = errorUntil,
         peerLimit = peerLimit,
         searching = agents.sessions.any { it.state == SessionState.Working && it.tool in MochiReactions.SEARCH_TOOLS },
+        thinking = agents.sessions.any { it.state == SessionState.Working && it.tool.isEmpty() },
     )
 }
 
