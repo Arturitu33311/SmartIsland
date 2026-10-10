@@ -168,7 +168,10 @@ class AgentRemote(private val context: Context, private val scope: CoroutineScop
                 // the person at once instead of at the next beat.
                 val touched = mine.idleS + 1 < lastIdle
                 if (now - lastBeat > BEAT_MS || music != lastMusic || news != lastNews || touched) {
-                    android.util.Log.d("Presence", "beat -> idle=${mine.idleS} screen=${mine.screenOn} music=$music touched=$touched")
+                    // Only what is news: a touch or a change (the periodic beat is not worth a line).
+                    if (touched || music != lastMusic || news != lastNews) {
+                        android.util.Log.d("Presence", "beat -> idle=${mine.idleS} screen=${mine.screenOn} music=$music touched=$touched")
+                    }
                     stream.output.write((RemoteProtocol.peer(mine, music, news) + "\n").toByteArray())
                     stream.output.flush()
                     lastBeat = now; lastMusic = music; lastNews = news
@@ -193,7 +196,6 @@ class AgentRemote(private val context: Context, private val scope: CoroutineScop
                     RemoteMsg.Disabled -> return "The phone link is off on the laptop (Settings → Phone)"
                     is RemoteMsg.Tasks -> CoucouTasks.mergeFromLaptop(context, msg.json)
                     is RemoteMsg.Peer -> {
-                        android.util.Log.d("Presence", "laptop <- idle=${msg.beat.idleS} screen=${msg.beat.screenOn} music=${msg.music}")
                         DeviceActivity.onPeer(context, msg.beat, msg.music, msg.news, msg.limit)
                     }
                     else -> {

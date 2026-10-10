@@ -144,7 +144,11 @@ private fun Setup() {
                     when (ui.status) {
                         AgentUi.Status.Off -> ui.detail.ifEmpty { "off" }
                         AgentUi.Status.Connecting -> "connecting…"
-                        AgentUi.Status.Connected -> "connected · ${ui.sessions.size} session(s)"
+                        AgentUi.Status.Connected -> {
+                            // Who has Mochi right now: it follows whichever device the person is using.
+                            val here = com.agupta07505.smartisland.coucou.presence.DeviceActivity.active.collectAsState().value
+                            "connected · ${ui.sessions.size} session(s) · Mochi is " + if (here) "on this phone" else "on the laptop"
+                        }
                         AgentUi.Status.Reconnecting -> "reconnecting… ${ui.detail}"
                         AgentUi.Status.LaptopClosed -> "Coucou is closed on the laptop"
                     }
