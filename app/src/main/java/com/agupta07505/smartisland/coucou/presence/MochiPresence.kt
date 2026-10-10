@@ -145,18 +145,14 @@ object MochiPresence {
     @Volatile private var shownIds: Set<Long> = emptySet()
 
     @Volatile private var screenOnTs = 0L
-    @Volatile private var lastTouchTs = 0L
 
     /** The overlay calls this when Alan touches the island: best idle signal we have without UsageStats. */
     fun noteInteraction() {
-        lastTouchTs = System.currentTimeMillis()
+        DeviceActivity.noteInteraction()
     }
 
-    fun idleSeconds(): Long {
-        val ref = maxOf(screenOnTs, lastTouchTs)
-        if (ref <= 0L) return 0L
-        return maxOf(0L, (System.currentTimeMillis() - ref) / 1000)
-    }
+    /** The idle clock lives in [DeviceActivity], so the arbitration works with this switch off. */
+    fun idleSeconds(): Long = DeviceActivity.idleSeconds()
 
     @Synchronized
     fun start(app: Context, scope: CoroutineScope) {
@@ -250,6 +246,7 @@ object MochiPresence {
         val key = PhoneSettings.mochiKey(app)
         Log.d(TAG, "tick: base=$base keyLen=${key.length}")
         if (key.isEmpty()) {
+            DeviceActivity.onServer(app, false, null)
             _status.value = "falta la clave en ajustes"
             Log.d(TAG, "sin clave en prefs")
             return
@@ -269,16 +266,20 @@ object MochiPresence {
         val active = PresenceNet.post(base, "/api/presence/heartbeat", key, beat)
             ?.let { runCatching { JSONObject(it).optString("active_device", "?") }.getOrNull() }
         Log.d(TAG, "heartbeat -> ${active ?: "SIN RESPUESTA"}")
+        // What the server says goes to the arbitration, which also hears the laptop and may overrule
+        // it when the two of us do not both reach the server (see Arbiter).
+        DeviceActivity.onServer(app, active != null, active)
         if (active == null) {
             _status.value = "sin enlace"
             return
         }
-        _status.value = if (active == "s21") "presencia aquí" else "presencia en $active"
+        _status.value = if (DeviceActivity.active.value) "presencia aquí" else "presencia en otro dispositivo"
         val inboxRaw = PresenceNet.get(base, "/api/mochi/inbox?since_id=0", key)
         val inbox = inboxRaw?.let { runCatching { parseInbox(it) }.getOrNull() }
         Log.d(TAG, "inbox -> ${inbox?.size ?: "SIN RESPUESTA"} mensajes (active=$active)")
         if (inbox == null) return
-        if (active != "s21") return
+        // Only the device Mochi is on shows Jinx's texts, and it does not ack them while another one is.
+        if (!DeviceActivity.active.value) return
         val nowS = System.currentTimeMillis() / 1000
         val (stale, fresh) = inbox.partition { nowS - it.ts > 3600 }
         ack(app, stale.map { it.id }.toSet())

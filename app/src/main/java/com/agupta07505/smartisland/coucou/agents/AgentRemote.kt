@@ -8,6 +8,9 @@ import android.content.Context
 import com.agupta07505.smartisland.coucou.CoucouTasks
 import com.agupta07505.smartisland.coucou.phone.PhoneSettings
 import com.agupta07505.smartisland.coucou.phone.Ssh
+import com.agupta07505.smartisland.coucou.presence.DeviceActivity
+import com.agupta07505.smartisland.coucou.ui.MochiReactions
+import com.agupta07505.smartisland.di.SmartIslandRepositories
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -46,6 +49,14 @@ class AgentRemote(private val context: Context, private val scope: CoroutineScop
     private val outbox = LinkedBlockingQueue<String>()
 
     @Volatile private var lastHeard = 0L
+
+    private val notificationRepo = SmartIslandRepositories.notificationRepository(context.applicationContext)
+
+    private companion object {
+        const val BEAT_MS = 5_000L
+        /** What counts as news in a beat: long enough that the next beat (or the edge) carries it. */
+        const val NEWS_BEAT_MS = 2_500L
+    }
 
     /** The task list changed here (or the link is new): tell the laptop at the next turn of the loop. */
     @Volatile private var tasksDirty = true
@@ -101,8 +112,10 @@ class AgentRemote(private val context: Context, private val scope: CoroutineScop
             } catch (e: Exception) {
                 ended = e.message ?: "cannot reach the laptop"
             }
-            // Nothing that was waiting can still be answered through a dead link.
+            // Nothing that was waiting can still be answered through a dead link, and a laptop we
+            // cannot hear is not there: this phone shows Mochi on its own again.
             model.pending.clear()
+            DeviceActivity.onLinkDown(context)
             publish(if (ended == "laptop-closed") AgentUi.Status.LaptopClosed else AgentUi.Status.Reconnecting, if (ended == "laptop-closed") "Coucou is closed on the laptop" else ended)
             delay(wait)
             wait = (wait * 2).coerceAtMost(30_000L)
@@ -122,6 +135,9 @@ class AgentRemote(private val context: Context, private val scope: CoroutineScop
         }.apply { isDaemon = true; start() }
         var lastPing = 0L
         var lastTasks = 0L
+        var lastBeat = 0L
+        var lastMusic = false
+        var lastNews = false
         // A new link: the lists meet first thing, whatever either side did while they were apart.
         tasksDirty = true
         try {
@@ -140,6 +156,15 @@ class AgentRemote(private val context: Context, private val scope: CoroutineScop
                     stream.output.write((RemoteProtocol.ping() + "\n").toByteArray()); stream.output.flush()
                     lastPing = now
                 }
+                // Who is at which device: a beat every few seconds, and at once when what it hears or
+                // sees changes (a song starting, news arriving), so the other Mochi reacts in time.
+                val music = MochiReactions.isMusicPlaying(notificationRepo.notifications.value)
+                val news = MochiReactions.freshArrival(notificationRepo.notifications.value, now, NEWS_BEAT_MS)
+                if (now - lastBeat > BEAT_MS || music != lastMusic || news != lastNews) {
+                    stream.output.write((RemoteProtocol.peer(DeviceActivity.myBeat(context), music, news) + "\n").toByteArray())
+                    stream.output.flush()
+                    lastBeat = now; lastMusic = music; lastNews = news
+                }
                 if (now - lastHeard > 50_000) return "no answer from the laptop"
                 while (true) {
                     val out = outbox.poll() ?: break
@@ -157,6 +182,7 @@ class AgentRemote(private val context: Context, private val scope: CoroutineScop
                     RemoteMsg.Offline -> return "laptop-closed"
                     RemoteMsg.Disabled -> return "The phone link is off on the laptop (Settings → Phone)"
                     is RemoteMsg.Tasks -> CoucouTasks.mergeFromLaptop(context, msg.json)
+                    is RemoteMsg.Peer -> DeviceActivity.onPeer(context, msg.beat, msg.music, msg.news)
                     else -> {
                         model.apply(msg, lastHeard)
                         publish(AgentUi.Status.Connected)

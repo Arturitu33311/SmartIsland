@@ -10,7 +10,9 @@ package com.agupta07505.smartisland.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.agupta07505.smartisland.coucou.presence.DeviceActivity
 import com.agupta07505.smartisland.data.INotificationRepository
+import com.agupta07505.smartisland.model.isCoucou
 import com.agupta07505.smartisland.data.SmartIslandCommand
 import com.agupta07505.smartisland.data.SmartIslandSettings
 import com.agupta07505.smartisland.data.SmartIslandSettingsRepository
@@ -46,11 +48,19 @@ class IslandViewModel(
     val notifications = notificationRepo.notifications
     val foregroundPackage = MutableStateFlow<String?>(null)
 
+    /**
+     * Mochi and Coucou's cards belong to the device that is being used. On the other one they are
+     * not drawn: nothing about them is dropped (a request keeps its timeout and its answer), the
+     * island simply does not show them. Everything that is not Coucou's shows as ever.
+     */
     val visibleNotifications: StateFlow<List<IslandNotification>> = combine(
         notifications,
         foregroundPackage,
-        settings
-    ) { list, fgPkg, s -> arrange(list, fgPkg, s) }.stateIn(
+        settings,
+        DeviceActivity.active
+    ) { list, fgPkg, s, mine ->
+        arrange(shownOn(mine, list), fgPkg, s)
+    }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.Eagerly,
         initialValue = emptyList()
@@ -93,6 +103,10 @@ class IslandViewModel(
         selectedKey = visibleNotifications.value.firstOrNull()?.key
         selectedIndex.value = 0
     }
+
+    /** What this device draws: all of it on the active one, without Coucou's own cards on the other. */
+    private fun shownOn(mine: Boolean, list: List<IslandNotification>): List<IslandNotification> =
+        if (mine) list else list.filterNot { it.mode.isCoucou }
 
     private fun arrange(list: List<IslandNotification>, fgPkg: String?, s: SmartIslandSettings): List<IslandNotification> =
         list.filterNot { notif ->
@@ -152,7 +166,7 @@ class IslandViewModel(
             runSuspendCatchingLogged(TAG, "Auto-expand collector failed") {
                 notificationRepo.autoExpandEvent.collect { key ->
                     // Hidden ones (battery off, the music of the app on screen) are not in the arranged list.
-                    val arranged = arrange(notifications.value, foregroundPackage.value, settings.value)
+                    val arranged = arrange(shownOn(DeviceActivity.active.value, notifications.value), foregroundPackage.value, settings.value)
                     val index = arranged.indexOfFirst { it.key == key }
                     if (index < 0 || !mayTakeFront(arranged[index])) return@collect
                     pin(key)

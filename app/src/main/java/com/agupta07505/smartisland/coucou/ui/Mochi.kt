@@ -42,7 +42,10 @@ import kotlin.math.sin
 /** What Mochi feels. Alert/Happy/Listening/Sleepy are his desk states; Surprised, Glance and
  * Dancing are his reactions to the island (news, then looking at it, music); Tired is low
  * battery and Celebrating is an emptied task list. */
-enum class MochiMood { Idle, Alert, Happy, Listening, Sleepy, Surprised, Glance, Dancing, Tired, Celebrating }
+enum class MochiMood { Idle, Alert, Happy, Listening, Sleepy, Surprised, Glance, Dancing, Tired, Celebrating, Working }
+
+/** The blue of Claude Code's working dots on the laptop's Mochi (engine.ts C.working). */
+private val WorkingBlue = Color(0xFF4F9BFF)
 
 /** Mochi's emerald: what he wears whenever no other colour means something (overdue is amber,
  * Claude is orange, questions are blue — those stay). */
@@ -254,6 +257,17 @@ fun MochiGlyph(
                     val ry = rx * 1.55f * blink
                     drawOval(ink, topLeft = Offset(cx - rx, eyeY - ry), size = Size(rx * 2, ry * 2))
                 }
+            }
+        }
+        if (mood == MochiMood.Working) {
+            // Three dots over his head lighting up in turn: Claude Code is working (same badge as the laptop's Mochi).
+            val phase = (beat * 3f).toInt() % 3
+            for (i in 0 until 3) {
+                drawCircle(
+                    color = WorkingBlue.copy(alpha = if (i == phase) 1f else 0.35f),
+                    radius = w * 0.045f,
+                    center = Offset(w * (0.30f + i * 0.20f), top - h * 0.02f),
+                )
             }
         }
         if (surprised && pop > 0.4f) {

@@ -19,6 +19,11 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.mutableStateOf
+import com.agupta07505.smartisland.coucou.CoucouRuntime
+import com.agupta07505.smartisland.coucou.agents.AgentUi
+import com.agupta07505.smartisland.coucou.agents.SessionState
+import com.agupta07505.smartisland.coucou.presence.DeviceActivity
 import com.agupta07505.smartisland.di.SmartIslandRepositories
 import com.agupta07505.smartisland.model.IslandMode
 import com.agupta07505.smartisland.model.IslandNotification
@@ -38,6 +43,10 @@ data class MochiScene(
     val greeted: Boolean = false,
     /** The task list just emptied: he celebrates. */
     val celebrating: Boolean = false,
+    /** Claude Code is working on the laptop: the same blue dots he wears there. */
+    val working: Boolean = false,
+    /** Claude Code just finished what it was doing: he is glad (a short happy moment). */
+    val finished: Boolean = false,
 )
 
 /**
@@ -60,6 +69,9 @@ object MochiReactions {
 
     /** How long the celebration lasts after the list empties. */
     const val CELEBRATE_MS = 3_000L
+
+    /** How long he stays glad after Claude Code finishes. */
+    const val FINISHED_MS = 3_000L
 
     fun isMusicPlaying(notifications: List<IslandNotification>): Boolean =
         notifications.any { it.mode == IslandMode.Music && it.mediaIsPlaying }
@@ -126,9 +138,15 @@ object MochiReactions {
         greetedUntil: Long,
         glanceUntil: Long,
         celebratedUntil: Long,
+        peerMusic: Boolean = false,
+        working: Boolean = false,
+        finishedUntil: Long = 0L,
     ): MochiScene =
         MochiScene(
-            musicPlaying = isMusicPlaying(notifications),
+            // The other device's music counts too: whichever one Mochi is on, he dances to it.
+            musicPlaying = isMusicPlaying(notifications) || peerMusic,
+            working = working,
+            finished = finishedUntil > now,
             surprised = surprisedUntil > now,
             glancing = glanceUntil > now,
             batteryLow = isBatteryLow(notifications),
@@ -213,6 +231,32 @@ fun rememberMochiScene(): MochiScene {
             glanceUntil = 0L
         }
     }
+    // The other device's news surprises him here as well (he is only drawn on one of them).
+    val peerNews by DeviceActivity.peerNews.collectAsState()
+    LaunchedEffect(peerNews) {
+        if (peerNews) {
+            val now = System.currentTimeMillis()
+            surprisedUntil = maxOf(surprisedUntil, now + MochiReactions.SURPRISE_MS)
+            glanceUntil = maxOf(glanceUntil, now + MochiReactions.GLANCE_MS)
+        }
+    }
+    // Claude Code at work on the laptop: dots while it works, a glad moment when it stops.
+    val agents by CoucouRuntime.agentUi.collectAsState()
+    val working = agents.status == AgentUi.Status.Connected && agents.sessions.any { it.state == SessionState.Working }
+    var finishedUntil by remember { mutableLongStateOf(0L) }
+    var wasWorking by remember { mutableStateOf(false) }
+    LaunchedEffect(working) {
+        if (wasWorking && !working) finishedUntil = System.currentTimeMillis() + MochiReactions.FINISHED_MS
+        wasWorking = working
+    }
+    LaunchedEffect(finishedUntil) {
+        val remaining = finishedUntil - System.currentTimeMillis()
+        if (remaining > 0) {
+            delay(remaining)
+            finishedUntil = 0L
+        }
+    }
+    val peerMusic by DeviceActivity.peerMusic.collectAsState()
     // Every unlock re-opens the hello (same moment the padlock badge shows)…
     val unlockMs = rememberUnlockMs()
     LaunchedEffect(unlockMs) {
@@ -226,7 +270,10 @@ fun rememberMochiScene(): MochiScene {
             greetedUntil = 0L
         }
     }
-    return MochiReactions.scene(notifications, System.currentTimeMillis(), surprisedUntil, greetedUntil, glanceUntil, 0L)
+    return MochiReactions.scene(
+        notifications, System.currentTimeMillis(), surprisedUntil, greetedUntil, glanceUntil, 0L,
+        peerMusic = peerMusic, working = working, finishedUntil = finishedUntil,
+    )
 }
 
 /**

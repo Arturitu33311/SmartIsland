@@ -49,6 +49,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
@@ -191,7 +192,8 @@ fun IslandOverlayView(
     // Shown whenever the island shows (and Mochi is wanted), except when his desk is the only
     // thing on it: then the main pill already shows him, and a second Mochi beside it would
     // look like a bug.
-    val mochiSecondary = !settings.enableNotchMode && context.showDesk &&
+    val mochiHere by com.agupta07505.smartisland.coucou.presence.DeviceActivity.active.collectAsState()
+    val mochiSecondary = !settings.enableNotchMode && context.showDesk && mochiHere &&
         !(notifications.size == 1 && activeNotification?.key == IslandDesk.KEY)
 
     // His desk never rests on the main pill: it is his home in the secondary bubble.

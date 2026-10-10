@@ -14,6 +14,7 @@ import com.agupta07505.smartisland.coucou.phone.PhoneSettings.followClaude
 import com.agupta07505.smartisland.coucou.phone.PhoneSettings.followJinx
 import com.agupta07505.smartisland.coucou.phone.PhoneSettings.jinxSync
 import com.agupta07505.smartisland.coucou.phone.PhoneSettings.showDesk
+import com.agupta07505.smartisland.coucou.presence.DeviceActivity
 import com.agupta07505.smartisland.coucou.presence.MochiPresence
 import com.agupta07505.smartisland.coucou.ui.DeskState
 import kotlinx.coroutines.flow.combine
@@ -65,6 +66,8 @@ object CoucouRuntime {
         val app = context.applicationContext
         ReminderScheduler.rearm(app)
         CoucouTasks.refresh(app)
+        // Who is at which device: runs whatever else is switched on or off.
+        DeviceActivity.start(app, scope)
 
         // Mochi, always in the island with the tasks
         if (deskJob == null) {

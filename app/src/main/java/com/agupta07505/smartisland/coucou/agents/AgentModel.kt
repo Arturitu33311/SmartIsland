@@ -4,6 +4,8 @@
 
 package com.agupta07505.smartisland.coucou.agents
 
+import com.agupta07505.smartisland.coucou.presence.Arbiter
+import com.agupta07505.smartisland.coucou.presence.Beat
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -45,6 +47,8 @@ sealed class RemoteMsg {
     data class Ack(val ok: Boolean, val id: String?, val why: String?) : RemoteMsg()
     /** The laptop's own list of tasks, merged with the phone's (see remote.rs `tasks_sync`): a JSON array. */
     data class Tasks(val json: String) : RemoteMsg()
+    /** The laptop's own beat: how recently it was used, whether it reaches the server, what it hears and sees. */
+    data class Peer(val beat: Beat, val music: Boolean, val news: Boolean) : RemoteMsg()
     data object Pong : RemoteMsg()
     data object Disabled : RemoteMsg()
     data object Offline : RemoteMsg()
@@ -68,6 +72,22 @@ object RemoteProtocol {
             "resolved" -> RemoteMsg.Resolved(s("request_id"), s("decision"))
             "ack" -> RemoteMsg.Ack(o.optBoolean("ok"), o.optString("request_id").takeIf { it.isNotEmpty() }, o.optString("why").takeIf { it.isNotEmpty() })
             "tasks" -> o.optJSONArray("tasks")?.let { RemoteMsg.Tasks(it.toString()) }
+            "peer" -> {
+                // Only the laptop speaks on this link, and only in terms of the two ids we know.
+                val device = o.optString("device")
+                if (device != Arbiter.LAPTOP) null
+                else RemoteMsg.Peer(
+                    Beat(
+                        device = device,
+                        idleS = o.optLong("idle", 0L).coerceIn(0L, MAX_IDLE_S),
+                        screenOn = o.optBoolean("screen_on", true),
+                        serverOk = o.optBoolean("server_ok", false),
+                        serverActive = o.optString("server_active").takeIf { it in Arbiter.KNOWN },
+                    ),
+                    music = o.optBoolean("music", false),
+                    news = o.optBoolean("news", false),
+                )
+            }
             "pong" -> RemoteMsg.Pong
             "disabled" -> RemoteMsg.Disabled
             "offline" -> RemoteMsg.Offline
@@ -96,6 +116,22 @@ object RemoteProtocol {
     fun answer(id: String, decision: String) = JSONObject().put("op", "answer").put("request_id", id).put("decision", decision).toString()
     fun decline(id: String) = JSONObject().put("op", "decline").put("request_id", id).toString()
     fun ping() = JSONObject().put("op", "ping").toString()
+
+    /** A week: past that an idle value means nothing, and an absurd one must not outlast a real one. */
+    const val MAX_IDLE_S = 7L * 24 * 3600
+
+    /** This phone's beat for the laptop: state only, nothing it could act on. */
+    fun peer(beat: Beat, music: Boolean, news: Boolean): String =
+        JSONObject()
+            .put("op", "peer")
+            .put("device", beat.device)
+            .put("idle", beat.idleS.coerceIn(0L, MAX_IDLE_S))
+            .put("screen_on", beat.screenOn)
+            .put("server_ok", beat.serverOk)
+            .put("server_active", beat.serverActive ?: JSONObject.NULL)
+            .put("music", music)
+            .put("news", news)
+            .toString()
 
     /** `answers` maps each question's text to the chosen label, or to a list of labels for a multi-select one. */
     fun answerQuestion(id: String, answers: Map<String, List<String>>, multi: Set<String>): String {
