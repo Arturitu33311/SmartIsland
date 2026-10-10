@@ -38,9 +38,23 @@ class SshException(message: String, cause: Throwable? = null) : Exception(messag
 /** What the phone does over ssh: one command per connection, run with the phone's own key. */
 object Ssh {
     init {
-        // Android ships a stripped-down "BC" provider; sshj needs the real one.
+        installProvider()
+    }
+
+    /**
+     * Android ships a stripped-down "BC" provider (it is also where the platform's own TLS finds its default
+     * key store, BKS); sshj needs the real one. The real one is built FIRST (loading it takes a while) and the
+     * swap is one step, so there is no moment in which this process has no "BC": in that window any
+     * HttpURLConnection died with a bare AssertionError, which took the island's whole process down. It goes
+     * last: sshj asks for it by name, the platform keeps resolving to its own providers. Safe to call twice.
+     */
+    @Synchronized
+    fun installProvider() {
+        val current = Security.getProvider("BC")
+        if (current is BouncyCastleProvider) return
+        val full = BouncyCastleProvider()
         Security.removeProvider("BC")
-        Security.insertProviderAt(BouncyCastleProvider(), 1)
+        Security.addProvider(full)
     }
 
     private const val CONNECT_MS = 8_000

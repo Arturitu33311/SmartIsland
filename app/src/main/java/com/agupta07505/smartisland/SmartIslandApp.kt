@@ -15,6 +15,8 @@ class SmartIslandApp : Application() {
     override fun onCreate() {
         super.onCreate()
         bypassHiddenApis()
+        // Before any thread can ask for TLS: see Ssh.installProvider.
+        runCatching { com.agupta07505.smartisland.coucou.phone.Ssh.installProvider() }
     }
 
     private fun bypassHiddenApis() {
