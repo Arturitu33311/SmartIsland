@@ -406,7 +406,9 @@ fun IslandOverlayView(
     val tertiaryIndex = if (tertiaryNotification != null) {
         notifications.indexOfFirst { it.key == tertiaryNotification.key }
     } else -1
-    val showTertiaryPill = notifications.size >= 3 && tertiaryNotification != null
+    // Only while expanded (compactShapes holds two shapes then): collapsed, a third pill would sit
+    // exactly on the main one and read as a second island.
+    val showTertiaryPill = shouldShowTertiaryPill(compactShapes, tertiaryNotification != null)
     val tertiaryAlpha by animateFloatAsState(
         targetValue = if (showTertiaryPill && !isHiding) 1f else 0f,
         animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
@@ -1197,6 +1199,11 @@ internal fun defaultEstimatedHeightForMode(mode: IslandMode?): Dp {
         IslandMode.Empty, null -> 280.dp
     }
 }
+
+internal fun shouldShowTertiaryPill(
+    compactShapes: List<CompactNotificationShape>,
+    hasTertiary: Boolean
+): Boolean = compactShapes.size == 2 && hasTertiary
 
 internal fun compactNotificationShapes(
     notificationCount: Int,

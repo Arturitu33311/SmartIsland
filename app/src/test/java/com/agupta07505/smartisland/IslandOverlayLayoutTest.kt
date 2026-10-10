@@ -9,6 +9,7 @@ package com.agupta07505.smartisland
 
 import com.agupta07505.smartisland.ui.CompactNotificationShape
 import com.agupta07505.smartisland.ui.compactNotificationShapes
+import com.agupta07505.smartisland.ui.shouldShowTertiaryPill
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -31,6 +32,25 @@ class IslandOverlayLayoutTest {
         assertEquals(
             listOf(CompactNotificationShape.MiniPill, CompactNotificationShape.Circle),
             compactNotificationShapes(notificationCount = 3, expanded = true)
+        )
+    }
+
+    @Test
+    fun thirdPillNeverShowsWhileCollapsed() {
+        // Collapsed it would land exactly on the main pill: two "main" islands stacked.
+        for (count in 0..6) {
+            assertEquals(
+                false,
+                shouldShowTertiaryPill(compactNotificationShapes(count, expanded = false), hasTertiary = true)
+            )
+        }
+        assertEquals(
+            true,
+            shouldShowTertiaryPill(compactNotificationShapes(3, expanded = true), hasTertiary = true)
+        )
+        assertEquals(
+            false,
+            shouldShowTertiaryPill(compactNotificationShapes(2, expanded = true), hasTertiary = true)
         )
     }
 
