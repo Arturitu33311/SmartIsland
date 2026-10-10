@@ -42,10 +42,13 @@ import kotlin.math.sin
 /** What Mochi feels. Alert/Happy/Listening/Sleepy are his desk states; Surprised, Glance and
  * Dancing are his reactions to the island (news, then looking at it, music); Tired is low
  * battery and Celebrating is an emptied task list. */
-enum class MochiMood { Idle, Alert, Happy, Listening, Sleepy, Surprised, Glance, Dancing, Tired, Celebrating, Working, Error }
+enum class MochiMood { Idle, Alert, Happy, Listening, Sleepy, Surprised, Glance, Dancing, Tired, Celebrating, Working, Searching, Error }
 
 /** The blue of Claude Code's working dots on the laptop's Mochi (engine.ts C.working). */
 private val WorkingBlue = Color(0xFF4F9BFF)
+
+/** …and of its searching dots (engine.ts C.searching). */
+private val SearchingIndigo = Color(0xFF6365F2)
 
 /** Mochi's emerald: what he wears whenever no other colour means something (overdue is amber,
  * Claude is orange, questions are blue — those stay). */
@@ -268,12 +271,14 @@ fun MochiGlyph(
             // A red dot over his head, like the laptop's error badge.
             drawCircle(Color(0xFFEF4444), radius = w * 0.06f, center = Offset(w * 0.5f, top - h * 0.02f))
         }
-        if (mood == MochiMood.Working) {
-            // Three dots over his head lighting up in turn: Claude Code is working (same badge as the laptop's Mochi).
+        if (mood == MochiMood.Working || mood == MochiMood.Searching) {
+            // Three dots over his head lighting up in turn: Claude Code is working (same badge as the laptop's
+            // Mochi; indigo while it searches).
             val phase = (beat * 3f).toInt() % 3
+            val dots = if (mood == MochiMood.Searching) SearchingIndigo else WorkingBlue
             for (i in 0 until 3) {
                 drawCircle(
-                    color = WorkingBlue.copy(alpha = if (i == phase) 1f else 0.35f),
+                    color = dots.copy(alpha = if (i == phase) 1f else 0.35f),
                     radius = w * 0.045f,
                     center = Offset(w * (0.30f + i * 0.20f), top - h * 0.02f),
                 )

@@ -48,7 +48,7 @@ sealed class RemoteMsg {
     /** The laptop's own list of tasks, merged with the phone's (see remote.rs `tasks_sync`): a JSON array. */
     data class Tasks(val json: String) : RemoteMsg()
     /** The laptop's own beat: how recently it was used, whether it reaches the server, what it hears and sees. */
-    data class Peer(val beat: Beat, val music: Boolean, val news: Boolean) : RemoteMsg()
+    data class Peer(val beat: Beat, val music: Boolean, val news: Boolean, val limit: Boolean = false) : RemoteMsg()
     data object Pong : RemoteMsg()
     data object Disabled : RemoteMsg()
     data object Offline : RemoteMsg()
@@ -86,6 +86,8 @@ object RemoteProtocol {
                     ),
                     music = o.optBoolean("music", false),
                     news = o.optBoolean("news", false),
+                    // Claude Code is rate-limited on the laptop: he is tired here too.
+                    limit = o.optBoolean("limit", false),
                 )
             }
             "pong" -> RemoteMsg.Pong

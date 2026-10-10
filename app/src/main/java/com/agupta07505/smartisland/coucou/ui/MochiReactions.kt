@@ -49,6 +49,8 @@ data class MochiScene(
     val finished: Boolean = false,
     /** A tool of Claude Code just failed: flat eyes and a red dot for a moment (as on the laptop). */
     val errored: Boolean = false,
+    /** What Claude Code is doing is a search (Grep, Glob, the web): indigo dots, as on the laptop. */
+    val searching: Boolean = false,
 )
 
 /**
@@ -77,6 +79,9 @@ object MochiReactions {
 
     /** How long a failed tool shows on his face. */
     const val ERROR_MS = 3_000L
+
+    /** The tools that read as "searching" (the laptop's Mochi scans with his eyes for these). */
+    val SEARCH_TOOLS = setOf("Grep", "Glob", "WebSearch", "WebFetch")
 
     fun isMusicPlaying(notifications: List<IslandNotification>): Boolean =
         notifications.any { it.mode == IslandMode.Music && it.mediaIsPlaying }
@@ -147,16 +152,20 @@ object MochiReactions {
         working: Boolean = false,
         finishedUntil: Long = 0L,
         errorUntil: Long = 0L,
+        peerLimit: Boolean = false,
+        searching: Boolean = false,
     ): MochiScene =
         MochiScene(
             errored = errorUntil > now,
+            searching = working && searching,
             // The other device's music counts too: whichever one Mochi is on, he dances to it.
             musicPlaying = isMusicPlaying(notifications) || peerMusic,
             working = working,
             finished = finishedUntil > now,
             surprised = surprisedUntil > now,
             glancing = glanceUntil > now,
-            batteryLow = isBatteryLow(notifications),
+            // Rate-limited on the laptop reads here as the same tired face with the bead of sweat.
+            batteryLow = isBatteryLow(notifications) || peerLimit,
             greeted = greetedUntil > now,
             celebrating = celebratedUntil > now,
         )
@@ -277,6 +286,7 @@ fun rememberMochiScene(): MochiScene {
         }
     }
     val peerMusic by DeviceActivity.peerMusic.collectAsState()
+    val peerLimit by DeviceActivity.peerLimit.collectAsState()
     // Every unlock re-opens the hello (same moment the padlock badge shows)…
     val unlockMs = rememberUnlockMs()
     LaunchedEffect(unlockMs) {
@@ -293,6 +303,8 @@ fun rememberMochiScene(): MochiScene {
     return MochiReactions.scene(
         notifications, System.currentTimeMillis(), surprisedUntil, greetedUntil, glanceUntil, 0L,
         peerMusic = peerMusic, working = working, finishedUntil = finishedUntil, errorUntil = errorUntil,
+        peerLimit = peerLimit,
+        searching = agents.sessions.any { it.state == SessionState.Working && it.tool in MochiReactions.SEARCH_TOOLS },
     )
 }
 

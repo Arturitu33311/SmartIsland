@@ -23,6 +23,10 @@ class WireFixturesTest {
         val peer = RemoteProtocol.parse(doc.getJSONObject("laptop_to_phone").getJSONObject("peer").toString(), 0L)
         assertTrue(peer is RemoteMsg.Peer)
         assertEquals("laptop", (peer as RemoteMsg.Peer).beat.device)
+        assertTrue(!peer.limit)
+        // A rate-limited laptop says so: the phone's Mochi is tired with it.
+        val limited = doc.getJSONObject("laptop_to_phone").getJSONObject("peer").put("limit", true)
+        assertTrue((RemoteProtocol.parse(limited.toString(), 0L) as RemoteMsg.Peer).limit)
 
         val tasks = RemoteProtocol.parse(doc.getJSONObject("laptop_to_phone").getJSONObject("tasks").toString(), 0L)
         assertTrue(tasks is RemoteMsg.Tasks)

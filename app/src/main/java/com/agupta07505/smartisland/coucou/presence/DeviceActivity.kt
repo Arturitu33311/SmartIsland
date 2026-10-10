@@ -44,7 +44,12 @@ object DeviceActivity {
     private const val SERVER_TTL_MS = 75_000L
     private const val NEWS_MS = 3_000L
 
-    private data class PeerState(val beat: Beat, val music: Boolean, val news: Boolean, val at: Long)
+    private val _peerLimit = MutableStateFlow(false)
+
+    /** Claude Code is rate-limited on the laptop: Mochi is tired here as well. */
+    val peerLimit: StateFlow<Boolean> = _peerLimit.asStateFlow()
+
+    private data class PeerState(val beat: Beat, val music: Boolean, val news: Boolean, val limit: Boolean, val at: Long)
 
     @Volatile private var peer: PeerState? = null
     @Volatile private var serverActive: String? = null
@@ -114,8 +119,8 @@ object DeviceActivity {
     }
 
     /** The laptop's beat arrived over the link. */
-    fun onPeer(app: Context, beat: Beat, music: Boolean, news: Boolean) {
-        peer = PeerState(beat, music, news, System.currentTimeMillis())
+    fun onPeer(app: Context, beat: Beat, music: Boolean, news: Boolean, limit: Boolean = false) {
+        peer = PeerState(beat, music, news, limit, System.currentTimeMillis())
         recompute(app)
     }
 
@@ -147,6 +152,7 @@ object DeviceActivity {
         _active.value = winner == Arbiter.PHONE
         val alive = p != null && now - p.at <= Arbiter.FRESH_MS
         _peerMusic.value = alive && p != null && p.music
+        _peerLimit.value = alive && p != null && p.limit
         // News is an edge, not a state: only the beat that carries it counts, not the ones after.
         _peerNews.value = alive && p != null && p.news && now - p.at <= NEWS_MS
     }

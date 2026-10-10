@@ -190,7 +190,7 @@ class AgentRemote(private val context: Context, private val scope: CoroutineScop
                     RemoteMsg.Offline -> return "laptop-closed"
                     RemoteMsg.Disabled -> return "The phone link is off on the laptop (Settings → Phone)"
                     is RemoteMsg.Tasks -> CoucouTasks.mergeFromLaptop(context, msg.json)
-                    is RemoteMsg.Peer -> DeviceActivity.onPeer(context, msg.beat, msg.music, msg.news)
+                    is RemoteMsg.Peer -> DeviceActivity.onPeer(context, msg.beat, msg.music, msg.news, msg.limit)
                     else -> {
                         model.apply(msg, lastHeard)
                         publish(AgentUi.Status.Connected)
