@@ -4,6 +4,27 @@ All notable changes to Smart Island should be documented in this file.
 
 The format is inspired by Keep a Changelog, and this project uses the GNU General Public License v3.0.
 
+## [Unreleased] - Coucou fork
+
+### Added
+- Mochi lives: awake by default, little gestures (yawn, stretch, look around, hop, whistle, scratch, wink, thought
+  bubble), asleep only at night or after 20 quiet minutes; a bolt while charging; a ring that closes over the
+  quarter hour before a reminder. Gestures rest with system animations off and with the screen off.
+- Desk: Undo after finishing a task, swipe a row to snooze 10 min, hold to reword it, a chip with the time the
+  sentence was understood as, the count rolls when it changes, rotating lines under his name.
+- Reminder card: +10 min, +1 h, Tomorrow 9:00, Done.
+- Claude Code on the island says what it is doing ("Editing Mochi.kt"), with the face and colour of that kind of
+  work, how long it has been at it and how many steps.
+- Edge contrast setting (Auto / On / Off): a graded rim of light so a dark island keeps its edge on a dark screen.
+- Spanish strings (`values-es`) for everything Coucou adds; `scripts/island-motion-check.sh`.
+
+### Fixed
+- The island no longer jumps sideways, blinks or sways when it opens or folds where the touchable-region hook is
+  blocked: the overlay is split into a full-width drawing window and a pill-sized touch window.
+- The pill no longer pulses every ~8 s (the desk was chosen as the resting card and moved off it again).
+- Hats, thought bubbles, "!", notes and "z" are no longer cut by the pill at island size.
+- Mochi on the island follows Jinx's mood, not Claude Code's; the agent's verb no longer sits under the camera.
+
 ## [7.0.0] - 2026-09-20
 
 ### Major Release Highlights (v7.0.0)
