@@ -283,12 +283,12 @@ fun IslandOverlayView(
     }
 
     val isHiding = isIdleHiding || (settings.autoHidePill && isAutoHidden)
-    // Dark island on a dark screen: lifted fill, hairline and sheen (EdgeContrast), so its edge shows.
+    // Dark island on a dark screen: a graded rim of light (EdgeContrast), so its edge shows.
     val systemDark = (configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
     val pillBase = Color(settings.pillColor)
     val pillLuminance = pillBase.luminance()
     val edgeContrastOn = com.agupta07505.smartisland.util.EdgeContrast.shouldApply(settings.edgeContrast, systemDark, pillLuminance)
-    val pillBackgroundColor = com.agupta07505.smartisland.util.EdgeContrast.fill(pillBase, edgeContrastOn, pillLuminance)
+    val pillBackgroundColor = pillBase
     // A light wash of the album cover over the main pill while music plays (the bars already wear
     // it full-strength): 35% toward the cover, gliding back to the setting when music stops or
     // the cover has no colour. The secondary bubble stays neutral so Mochi always pops.

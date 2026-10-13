@@ -1,6 +1,5 @@
 package com.agupta07505.smartisland.util
 
-import androidx.compose.ui.graphics.Color
 import com.agupta07505.smartisland.data.SmartIslandSettings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -33,12 +32,10 @@ class EdgeContrastTest {
     }
 
     @Test
-    fun only_pure_black_is_lifted() {
-        val black = Color(0xFF000000)
-        val navy = Color(0xFF0A1A3A)
-        assertEquals(Color(0xFF1C1C1E), EdgeContrast.fill(black, on = true, luminance = 0f))
-        assertEquals(black, EdgeContrast.fill(black, on = false, luminance = 0f))
-        assertEquals(navy, EdgeContrast.fill(navy, on = true, luminance = 0.012f))
+    fun the_rim_is_strongest_on_top_and_fades_down() {
+        assertTrue(EdgeContrast.RIM_TOP_ALPHA > EdgeContrast.RIM_MID_ALPHA)
+        assertTrue(EdgeContrast.RIM_MID_ALPHA > EdgeContrast.RIM_BOTTOM_ALPHA)
+        assertTrue(EdgeContrast.RIM_BOTTOM_ALPHA > 0f)
     }
 
     @Test
