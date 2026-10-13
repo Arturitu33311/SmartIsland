@@ -127,6 +127,13 @@ class MochiIdleScriptTest {
     }
 
     @Test
+    fun desk_status_counts_what_is_open() {
+        assertEquals("All clear", MochiIdleScript.deskStatus(0, 0))
+        assertEquals("3 to do", MochiIdleScript.deskStatus(3, 0))
+        assertEquals("2 overdue", MochiIdleScript.deskStatus(3, 2))
+    }
+
+    @Test
     fun thought_emoji_follows_the_hour() {
         val rnd = Random(5)
         val night = (0 until 100).map { MochiIdleScript.thoughtFor(hour = 2, rnd = rnd) }

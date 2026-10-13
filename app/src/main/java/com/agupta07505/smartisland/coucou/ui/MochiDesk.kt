@@ -168,7 +168,11 @@ fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modif
             LivelyMochi(
                 size = 38.dp, tint = tint, mood = mood, outfit = rememberMochiOutfit(mood),
                 tickleSignal = tickles,
-                modifier = Modifier.clip(CircleShape).clickable {
+                // (No clip: it would cut his hat and the confetti. No ripple either.)
+                modifier = Modifier.clickable(
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    indication = null,
+                ) {
                     touchIsland(context)
                     Haptics.tap(context)
                     tickles++
@@ -176,28 +180,28 @@ fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modif
             )
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(
-                    when {
-                        smileUntil > now -> "Nice!"
-                        overdue > 0 -> "$overdue overdue"
-                        open.isEmpty() -> "All clear"
-                        else -> "${open.size} to do"
-                    },
-                    color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
-                )
                 val next = open.firstOrNull { it.remindAt != null && it.remindAt * 1000 >= now }
                 val hour = java.util.Calendar.getInstance().apply { timeInMillis = now }.get(java.util.Calendar.HOUR_OF_DAY)
-                val subtitle = next?.let { "next · ${time(it.remindAt!!)}  ${it.title}" } ?: when {
+                // What he says is the headline; the count and the next timed task ride underneath.
+                val headline = when {
+                    smileUntil > now -> "Nice!"
                     mood == MochiMood.Dancing -> "♪ dancing"
                     mood == MochiMood.Sleepy -> "Mochi está durmiendo 💤"
                     else -> MochiIdleScript.phraseAt(MochiIdleScript.phrases(open.size, overdue, hour), phraseStep)
                 }
-                Crossfade(targetState = subtitle, label = "desk-subtitle") { line ->
+                val status = MochiIdleScript.deskStatus(open.size, overdue) +
+                    (next?.let { " · ${time(it.remindAt!!)}  ${it.title}" } ?: "")
+                Crossfade(targetState = headline, label = "desk-headline") { line ->
                     Text(
                         line,
-                        color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                 }
+                Text(
+                    status,
+                    color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
             }
         }
 

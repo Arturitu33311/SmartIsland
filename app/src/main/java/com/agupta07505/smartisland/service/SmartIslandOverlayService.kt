@@ -77,6 +77,15 @@ class SmartIslandOverlayService : AccessibilityService() {
     @Volatile private var destroyed = false
     private var isWindowExpanded: Boolean = false
     private var collapseJob: kotlinx.coroutines.Job? = null
+
+    // Without the touchable-region hook the window really changes size (pill-sized <-> full screen).
+    // For the first frames after such a resize the system still shows the previous buffer at the new
+    // origin, which reads as the island jumping sideways. These hide that: the view is made transparent,
+    // resized, and shown again once frames at the new size have been drawn. [windowReady] holds the
+    // expand animation back until then, so it starts from a window that is already the right size.
+    private val windowReady = MutableStateFlow(true)
+    private var maskJob: kotlinx.coroutines.Job? = null
+    private var pendingParams: WindowManager.LayoutParams? = null
     private var lastParams: WindowManager.LayoutParams? = null
 
     private val torchCallback = object : android.hardware.camera2.CameraManager.TorchCallback() {
@@ -490,6 +499,7 @@ class SmartIslandOverlayService : AccessibilityService() {
                 setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
                 setContent {
                     val fullWidth by isTouchableRegionSupported.collectAsState()
+                    val ready by windowReady.collectAsState()
                     OverlayIsland(
                         viewModel = this@SmartIslandOverlayService.viewModel,
                         statusBarHeight = statusBarHeight,
@@ -500,7 +510,8 @@ class SmartIslandOverlayService : AccessibilityService() {
                             performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
                             viewModel.collapse()
                         },
-                        isFullWidth = fullWidth
+                        isFullWidth = fullWidth,
+                        windowReady = ready
                     )
                 }
 
@@ -739,9 +750,40 @@ class SmartIslandOverlayService : AccessibilityService() {
                 blurBehindRadius = targetBlur
             }
         }
+        val resizes = lp != null && (lp.width != w || lp.x != currentX)
         lastParams = params
-        runCatchingLogged(TAG, "Failed to update view layout") { 
-            windowManager.updateViewLayout(view, params) 
+        if (maskJob?.isActive == true) {
+            // A masked resize is under way: it applies whatever was asked for last.
+            pendingParams = params
+            return
+        }
+        if (resizes && view.isAttachedToWindow && view.visibility == android.view.View.VISIBLE) {
+            applyWindowResizeMasked(view, params, growing = expanded)
+            return
+        }
+        runCatchingLogged(TAG, "Failed to update view layout") {
+            windowManager.updateViewLayout(view, params)
+        }
+    }
+
+    private fun applyWindowResizeMasked(view: android.view.View, params: WindowManager.LayoutParams, growing: Boolean) {
+        pendingParams = params
+        if (growing) windowReady.value = false
+        view.alpha = 0f
+        maskJob = serviceScope.launch {
+            try {
+                // Two frames drawn transparent, so nothing visible is left to be shown out of place...
+                kotlinx.coroutines.delay(WINDOW_MASK_BEFORE_MS)
+                pendingParams?.let { p ->
+                    runCatchingLogged(TAG, "Failed to update view layout") { windowManager.updateViewLayout(view, p) }
+                }
+                // ...and two more at the new size before he is shown again.
+                kotlinx.coroutines.delay(WINDOW_MASK_AFTER_MS)
+            } finally {
+                view.alpha = 1f
+                windowReady.value = true
+                pendingParams = null
+            }
         }
     }
 
@@ -1020,5 +1062,7 @@ class SmartIslandOverlayService : AccessibilityService() {
         // Must cover the longest spring settle (~520f stiffness) of the collapse
         // morph so the window is only shrunk after the pill has visually landed.
         private const val COLLAPSE_WINDOW_DELAY_MS = 650L
+        private const val WINDOW_MASK_BEFORE_MS = 34L
+        private const val WINDOW_MASK_AFTER_MS = 34L
     }
 }

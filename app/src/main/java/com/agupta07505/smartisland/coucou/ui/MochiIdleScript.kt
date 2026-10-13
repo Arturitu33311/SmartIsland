@@ -111,6 +111,13 @@ object MochiIdleScript {
         return extra + base
     }
 
+    /** The small grey line under the headline: how many things are open. */
+    fun deskStatus(open: Int, overdue: Int): String = when {
+        overdue > 0 -> "$overdue overdue"
+        open == 0 -> "All clear"
+        else -> "$open to do"
+    }
+
     fun phraseAt(list: List<String>, step: Int): String =
         if (list.isEmpty()) "" else list[Math.floorMod(step, list.size)]
 }

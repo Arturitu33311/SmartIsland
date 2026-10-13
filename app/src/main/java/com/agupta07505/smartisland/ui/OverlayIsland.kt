@@ -29,10 +29,14 @@ fun OverlayIsland(
     onOpenFloatingWindow: () -> Unit,
     onOpenNotificationShade: () -> Unit = {},
     modifier: Modifier = Modifier,
-    isFullWidth: Boolean = true
+    isFullWidth: Boolean = true,
+    // False while the overlay window is being resized (see SmartIslandOverlayService): the expand
+    // animation waits for it instead of starting inside a window that is about to change size.
+    windowReady: Boolean = true
 ) {
     val settings by viewModel.settings.collectAsState()
-    val expanded by viewModel.expanded.collectAsState()
+    val expandedRequested by viewModel.expanded.collectAsState()
+    val expanded = expandedRequested && windowReady
     val notifications by viewModel.visibleNotifications.collectAsState()
     val selectedIndex by viewModel.selectedIndex.collectAsState()
     val isLocked by viewModel.isLocked.collectAsState()
