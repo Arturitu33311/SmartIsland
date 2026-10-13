@@ -151,14 +151,16 @@ class SmartIslandOverlayService : AccessibilityService() {
     // Wrapped: an uncaught throw here makes Android auto-disable the
     // AccessibilityService, which is exactly the "turns off by itself" symptom.
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // Using the phone anywhere counts as being at the phone (a touch, a click, a scroll, typing, an
-        // app opening): that is what makes Mochi follow the person here from the laptop.
+        // Using the phone anywhere counts as being at the phone (a touch, a click, a scroll, an app
+        // opening): that is what makes Mochi follow the person here from the laptop. Only the KIND of
+        // event is looked at, never its text or its source: the service declares no right to read
+        // another app's window (accessibility_service_config.xml), because banking apps refuse to run
+        // beside a service that could read their fields, and typing is not listened to for the same reason.
         when (event?.eventType) {
             AccessibilityEvent.TYPE_TOUCH_INTERACTION_START,
             AccessibilityEvent.TYPE_VIEW_CLICKED,
             AccessibilityEvent.TYPE_VIEW_LONG_CLICKED,
             AccessibilityEvent.TYPE_VIEW_SCROLLED,
-            AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ->
                 com.agupta07505.smartisland.coucou.presence.DeviceActivity.noteInteraction()
             else -> Unit
