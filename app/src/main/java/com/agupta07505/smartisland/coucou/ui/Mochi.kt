@@ -92,6 +92,14 @@ fun MochiGlyph(
     lookX: Float = 0f,
     // What he wears (see MochiWardrobe.kt); Outfit.None draws exactly what he always drew.
     outfit: Outfit = Outfit.None,
+    // A little thing he does on his own while calm (see MochiIdleScript); only drawn in Idle.
+    gesture: IdleGesture = IdleGesture.None,
+    // 0..1 along the gesture.
+    gestureProgress: Float = 0f,
+    // Plugged in and charging: contented eyes and a pulsing bolt (Idle only).
+    charging: Boolean = false,
+    // The emoji floating in his thought bubble while he does [IdleGesture.Think].
+    thought: String = "💭",
 ) {
     // The outfit goes on with a little overshoot, each time it changes.
     val enter = remember(outfit) { Animatable(0f) }
@@ -155,6 +163,17 @@ fun MochiGlyph(
     val tired = mood == MochiMood.Tired
     val celebrating = mood == MochiMood.Celebrating
     val glancing = mood == MochiMood.Glance
+    val g = if (mood == MochiMood.Idle) gesture else IdleGesture.None
+    // Bell-shaped 0..1..0 over the gesture: every move eases in and out with it.
+    val env = if (g == IdleGesture.None) 0f else sin(PI.toFloat() * gestureProgress.coerceIn(0f, 1f))
+    val gp = gestureProgress.coerceIn(0f, 1f)
+    val gestureTilt = when (g) {
+        IdleGesture.Scratch -> sin(gp * 6f * PI.toFloat()) * 6f * env
+        IdleGesture.Whistle -> sin(gp * 2f * PI.toFloat()) * 4f
+        IdleGesture.Tickle -> sin(gp * 10f * PI.toFloat()) * 10f * env
+        IdleGesture.Hop -> sin(gp * 2f * PI.toFloat()) * 3f
+        else -> 0f
+    }
     // Text decorations ("!", notes, "z") go through Compose's own text measurer: no platform-canvas
     // interop, so they work on every canvas that draws him (island overlay included).
     val textMeasurer = rememberTextMeasurer()
@@ -187,16 +206,25 @@ fun MochiGlyph(
         celebrating -> sin(wave) * 8f
         tired -> 7f
         glancing -> lookX * 6f
-        else -> 0f
+        else -> gestureTilt
     }
     val shiftX = if (dancing) sin(wave) * 0.07f else if (surprised) (bob - 0.5f) * 0.05f else 0f
     val hop = when {
         dancing -> -abs(sin(wave)) * 0.09f
         celebrating -> -abs(sin(wave)) * 0.13f
+        g == IdleGesture.Hop -> -abs(sin(gp * 2f * PI.toFloat())) * 0.16f
+        g == IdleGesture.Tickle -> -abs(sin(gp * 5f * PI.toFloat())) * 0.05f * env
         else -> 0f
     }
     val breathe = if (!dancing && !surprised && !tired) 1f + (bob - 0.5f) * 0.03f else 1f
     val scale = if (surprised) 0.6f + pop * 0.4f else 1f
+    // Stretch reaches up and narrows; a yawn swells him a little.
+    val gestureStretchY = when (g) {
+        IdleGesture.Stretch -> 1f + 0.14f * env
+        IdleGesture.Yawn -> 1f + 0.05f * env
+        else -> 1f
+    }
+    val gestureStretchX = if (g == IdleGesture.Stretch) 1f - 0.05f * env else 1f
     Canvas(
         modifier
             .size(size)
@@ -205,8 +233,8 @@ fun MochiGlyph(
                 translationX = shiftX * size.toPx()
                 translationY = hop * size.toPx()
                 // (`fit` shrinks him with a big outfit on, so a witch's brim stays in his box.)
-                scaleX = scale * breathe * fit
-                scaleY = scale * (if (dancing) 2f - breathe else 1f) * fit
+                scaleX = scale * breathe * fit * gestureStretchX
+                scaleY = scale * (if (dancing) 2f - breathe else 1f) * fit * gestureStretchY
             },
     ) {
         val w = this.size.width
@@ -228,7 +256,10 @@ fun MochiGlyph(
             R = w / 2.28f,
             yaw = when {
                 glancing -> lookX * 0.45f
-                mood == MochiMood.Idle -> peek * 0.35f
+                mood == MochiMood.Idle -> peek * 0.35f + when (g) {
+                    IdleGesture.LookAround -> sin(gp * 2f * PI.toFloat()) * 0.4f
+                    else -> 0f
+                }
                 dancing -> sin(wave) * 0.25f
                 else -> 0f
             },
@@ -255,21 +286,27 @@ fun MochiGlyph(
             )
         }
         val ink = Color(0xFF1B1B20)
-        val eyeY = top + bodyH * 0.46f
+        val eyeY = top + bodyH * 0.46f - (if (g == IdleGesture.LookUp) bodyH * 0.07f * env else 0f)
         val lean = if (mood == MochiMood.Listening) w * 0.04f else 0f
         // Looking aside: on purpose toward the main pill when glancing, idly both ways in Idle.
         val glanceShift = if (glancing) lookX * w * 0.10f else 0f
-        val idleShift = if (mood == MochiMood.Idle) peek * w * 0.07f else 0f
-        val happyEyes = mood == MochiMood.Happy || dancing || celebrating
-        for (cx in listOf(w * 0.32f + lean + glanceShift + idleShift, w * 0.68f + lean + glanceShift + idleShift)) {
+        val idleShift = if (mood == MochiMood.Idle) {
+            peek * w * 0.07f + if (g == IdleGesture.LookAround) sin(gp * 2f * PI.toFloat()) * w * 0.08f else 0f
+        } else 0f
+        val contented = (charging && mood == MochiMood.Idle && g == IdleGesture.None) || g == IdleGesture.Tickle
+        val happyEyes = mood == MochiMood.Happy || dancing || celebrating || contented
+        val eyesShut = mood == MochiMood.Sleepy || (g == IdleGesture.Yawn && env > 0.25f) ||
+            (g == IdleGesture.Stretch && env > 0.25f)
+        val xs = listOf(w * 0.32f + lean + glanceShift + idleShift, w * 0.68f + lean + glanceShift + idleShift)
+        for ((eyeIdx, cx) in xs.withIndex()) {
             when {
-                mood == MochiMood.Sleepy -> {
+                eyesShut -> {
                     // closed eyes: a short line each
                     val r = w * 0.07f
                     drawLine(ink, Offset(cx - r, eyeY + r * 0.2f), Offset(cx + r, eyeY + r * 0.2f), strokeWidth = w * 0.05f, cap = StrokeCap.Round)
                 }
-                happyEyes -> {
-                    // ^ ^ : a small arc for each eye
+                happyEyes || (g == IdleGesture.Wink && eyeIdx == 1 && env > 0.3f) -> {
+                    // ^ ^ : a small arc for each eye (a wink is just the right one)
                     val r = w * 0.085f
                     val p = Path().apply {
                         moveTo(cx - r, eyeY + r * 0.6f)
@@ -309,6 +346,30 @@ fun MochiGlyph(
         }
         // In front of his eyes (glasses sit on them), under the badges and decorations.
         drawOutfitFront(outfit, head, w / 2f, headCy, enter.value, beatTime, eyeDy = -0.1f * bodyH)
+        if (g == IdleGesture.Yawn && env > 0.1f) {
+            // The mouth opens wide as he yawns.
+            val mw = w * 0.07f * env
+            val mh = w * 0.10f * env
+            drawOval(Color(0xFF1B1B20), topLeft = Offset(w / 2f - mw, eyeY + bodyH * 0.24f), size = Size(mw * 2, mh * 2))
+        }
+        if (g == IdleGesture.Whistle) {
+            val r = w * 0.035f
+            drawCircle(Color(0xFF1B1B20), radius = r, center = Offset(w / 2f, eyeY + bodyH * 0.27f))
+            glyph(textMeasurer, "♪", w * 0.80f, top - h * (0.02f + gp * 0.22f), w * 0.30f, Color.White, (1f - gp).coerceIn(0f, 1f))
+        }
+        if (g == IdleGesture.Think) {
+            // A thought bubble: two little puffs and a cloud with something on his mind.
+            val a = (env * 3f).coerceIn(0f, 1f)
+            val cloud = Color.White.copy(alpha = 0.92f * a)
+            drawCircle(cloud, radius = w * 0.035f, center = Offset(w * 0.70f, top + bodyH * 0.02f))
+            drawCircle(cloud, radius = w * 0.055f, center = Offset(w * 0.80f, top - h * 0.07f))
+            drawCircle(cloud, radius = w * 0.24f, center = Offset(w * 0.78f, top - h * 0.24f))
+            glyph(textMeasurer, thought, w * 0.78f, top - h * 0.24f, w * 0.30f, Color.White, a)
+        }
+        if (charging && mood == MochiMood.Idle) {
+            // Plugged in: a bolt that breathes with him.
+            glyph(textMeasurer, "⚡", w * 0.88f, top - h * 0.02f, w * 0.28f, Color(0xFFFACC15), 0.6f + 0.4f * bob)
+        }
         if (mood == MochiMood.Error) {
             // A red dot over his head, like the laptop's error badge.
             drawCircle(Color(0xFFEF4444), radius = w * 0.06f, center = Offset(w * 0.5f, top - h * 0.02f))

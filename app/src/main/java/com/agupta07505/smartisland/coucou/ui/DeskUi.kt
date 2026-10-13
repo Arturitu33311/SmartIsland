@@ -37,8 +37,8 @@ object DeskState {
 fun DeskCollapsedGlyph(notification: IslandNotification?) {
     when (notification?.category) {
         DeskState.OVERDUE -> MochiGlyph(24.dp, ReminderAmber, MochiMood.Alert)
-        DeskState.CLEAR -> MochiGlyph(24.dp, MochiEmerald, MochiMood.Sleepy)
-        else -> MochiGlyph(24.dp, MochiEmerald, MochiMood.Idle)
+        // Awake and doing his little things; he only dozes at night or after 20 quiet minutes.
+        else -> LivelyMochi(24.dp, MochiEmerald, rememberCalmMood(emptyList()))
     }
 }
 
@@ -71,6 +71,7 @@ private fun bubbleMood(lookDir: Float): BubbleMood {
     val open = tasks.filter { !it.done }
     val overdue = open.any { it.remindAt != null && it.remindAt * 1000 <= now }
     val celebrating = rememberCelebration(open.size)
+    val calm = rememberCalmMood(open.mapNotNull { it.remindAt })
     val mood = when {
         celebrating -> MochiMood.Celebrating
         overdue -> MochiMood.Alert
@@ -84,9 +85,7 @@ private fun bubbleMood(lookDir: Float): BubbleMood {
         scene.thinking -> MochiMood.Thinking
         scene.working -> MochiMood.Working
         scene.musicPlaying -> MochiMood.Dancing
-        MochiReactions.isNight(now) -> MochiMood.Sleepy
-        open.isEmpty() -> MochiMood.Sleepy
-        else -> MochiMood.Idle
+        else -> calm
     }
     return BubbleMood(mood, if (overdue) ReminderAmber else MochiEmerald, open.size)
 }
@@ -100,7 +99,7 @@ private fun bubbleMood(lookDir: Float): BubbleMood {
 @Composable
 fun MochiBubble(size: Dp = 22.dp, lookDir: Float = 0f) {
     val b = bubbleMood(lookDir)
-    MochiGlyph(size, b.tint, b.mood, lookX = lookDir, outfit = rememberMochiOutfit(b.mood))
+    LivelyMochi(size, b.tint, b.mood, lookX = lookDir, outfit = rememberMochiOutfit(b.mood))
 }
 
 /** His bubble grown into a mini-pill (expanded island): him, with how many things are open. */
@@ -108,7 +107,7 @@ fun MochiBubble(size: Dp = 22.dp, lookDir: Float = 0f) {
 fun MochiBubblePill(lookDir: Float = 0f) {
     val b = bubbleMood(lookDir)
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        MochiGlyph(20.dp, b.tint, b.mood, lookX = lookDir, outfit = rememberMochiOutfit(b.mood))
+        LivelyMochi(20.dp, b.tint, b.mood, lookX = lookDir, outfit = rememberMochiOutfit(b.mood))
         if (b.open > 0) {
             Box(
                 Modifier.clip(RoundedCornerShape(50)).background(b.tint.copy(alpha = 0.22f))

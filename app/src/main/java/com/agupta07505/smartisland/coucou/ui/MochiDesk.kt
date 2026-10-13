@@ -4,6 +4,7 @@
 
 package com.agupta07505.smartisland.coucou.ui
 
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -30,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -78,6 +80,15 @@ fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modif
     var picking by remember { mutableStateOf(false) }
     val whenState = rememberWhenState()
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var tickles by remember { mutableIntStateOf(0) }
+    // The line under his name changes every so often when there is no timed task to show.
+    var phraseStep by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(20_000)
+            phraseStep++
+        }
+    }
     val focus = remember { FocusRequester() }
 
     // The desk is opened to be read: bring the list up to date, and ask Jinx for hers.
@@ -104,12 +115,14 @@ fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modif
     val overdue = open.count { it.remindAt != null && it.remindAt * 1000 < now }
     val scene = rememberMochiScene()
     val celebrating = rememberCelebration(open.size)
+    val calm = rememberCalmMood(open.mapNotNull { it.remindAt })
     // Same attention order as his bubble (no look direction here: the desk fills the island, so
     // the stare stays centered). Music is ambience: it only gets him dancing when nothing needs
     // him; at night he naps through calm tasks.
     val mood = when {
         celebrating -> MochiMood.Celebrating
-        smileUntil > now -> MochiMood.Happy
+        // Finishing a task: a short burst of confetti.
+        smileUntil > now -> MochiMood.Celebrating
         overdue > 0 -> MochiMood.Alert
         scene.batteryLow -> MochiMood.Tired
         scene.greeted -> MochiMood.Happy
@@ -121,9 +134,7 @@ fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modif
         scene.thinking -> MochiMood.Thinking
         scene.working -> MochiMood.Working
         scene.musicPlaying -> MochiMood.Dancing
-        MochiReactions.isNight(now) -> MochiMood.Sleepy
-        open.isEmpty() -> MochiMood.Sleepy
-        else -> MochiMood.Idle
+        else -> calm
     }
     val tint = if (overdue > 0) ReminderAmber else MochiEmerald
 
@@ -153,7 +164,16 @@ fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modif
 
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            MochiGlyph(size = 38.dp, tint = tint, mood = mood, outfit = rememberMochiOutfit(mood))
+            // A tap on him tickles him (the island stays open: he is a pet, not a button).
+            LivelyMochi(
+                size = 38.dp, tint = tint, mood = mood, outfit = rememberMochiOutfit(mood),
+                tickleSignal = tickles,
+                modifier = Modifier.clip(CircleShape).clickable {
+                    touchIsland(context)
+                    Haptics.tap(context)
+                    tickles++
+                },
+            )
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
@@ -166,14 +186,18 @@ fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modif
                     color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                 )
                 val next = open.firstOrNull { it.remindAt != null && it.remindAt * 1000 >= now }
-                Text(
-                    next?.let { "next · ${time(it.remindAt!!)}  ${it.title}" } ?: when {
-                        mood == MochiMood.Dancing -> "♪ dancing"
-                        open.isEmpty() -> "Mochi is napping"
-                        else -> "nothing timed"
-                    },
-                    color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                )
+                val hour = java.util.Calendar.getInstance().apply { timeInMillis = now }.get(java.util.Calendar.HOUR_OF_DAY)
+                val subtitle = next?.let { "next · ${time(it.remindAt!!)}  ${it.title}" } ?: when {
+                    mood == MochiMood.Dancing -> "♪ dancing"
+                    mood == MochiMood.Sleepy -> "Mochi está durmiendo 💤"
+                    else -> MochiIdleScript.phraseAt(MochiIdleScript.phrases(open.size, overdue, hour), phraseStep)
+                }
+                Crossfade(targetState = subtitle, label = "desk-subtitle") { line ->
+                    Text(
+                        line,
+                        color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
 
