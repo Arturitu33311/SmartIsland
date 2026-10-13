@@ -55,6 +55,7 @@ import com.agupta07505.smartisland.coucou.phone.PhoneSettings.jinxSync
 import com.agupta07505.smartisland.coucou.ui.Haptics
 import com.agupta07505.smartisland.coucou.ui.MochiGlyph
 import com.agupta07505.smartisland.coucou.ui.MochiMood
+import com.agupta07505.smartisland.coucou.ui.rememberMochiOutfit
 import com.agupta07505.smartisland.coucou.ui.WhenCalendarButton
 import com.agupta07505.smartisland.coucou.ui.WhenPickerPanel
 import com.agupta07505.smartisland.coucou.ui.rememberWhenState
@@ -109,7 +110,7 @@ private fun TasksScreen() {
             .padding(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            MochiGlyph(size = 34.dp, mood = MochiMood.Idle)
+            MochiGlyph(size = 34.dp, mood = MochiMood.Idle, outfit = rememberMochiOutfit(MochiMood.Idle))
             Spacer(Modifier.width(12.dp))
             Text("Tasks", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
             IconButton(onClick = { context.startActivity(android.content.Intent(context, PhoneSetupActivity::class.java)) }) {

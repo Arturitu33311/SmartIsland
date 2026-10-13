@@ -12,6 +12,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -51,6 +54,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.agupta07505.smartisland.coucou.CoucouRuntime
 import com.agupta07505.smartisland.coucou.agents.AgentUi
+import com.agupta07505.smartisland.coucou.presence.Arbiter
+import com.agupta07505.smartisland.coucou.ui.MochiGlyph
+import com.agupta07505.smartisland.coucou.ui.MochiMood
+import com.agupta07505.smartisland.coucou.ui.Outfit
+import com.agupta07505.smartisland.coucou.ui.Wardrobe
 import com.agupta07505.smartisland.coucou.phone.PhoneSettings.followClaude
 import com.agupta07505.smartisland.coucou.phone.PhoneSettings.followJinx
 import com.agupta07505.smartisland.coucou.phone.PhoneSettings.jinxSync
@@ -109,6 +117,59 @@ private fun Setup() {
                 Text("Keep Mochi in the island, with my tasks", color = Color.White, fontSize = 14.sp)
             }
             Text("A small Mochi that is always there: asleep when nothing is open, looking up when something is overdue. Open the island to see the tasks and add one.", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
+        }
+
+        Card("Mochi's outfit") {
+            var choice by remember { mutableStateOf(with(PhoneSettings) { context.mochiOutfit }) }
+            Text(
+                "Auto follows the seasons (Santa hat in December, witch hat in October, bunny ears at Easter, sunglasses " +
+                    "in summer, party hat at New Year), a night cap when he sleeps and headphones when music plays.",
+                color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp,
+            )
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                val options = listOf("auto" to "Auto") + Outfit.entries.map { it.id to it.label }
+                for ((id, label) in options) {
+                    val on = choice == id
+                    Column(
+                        Modifier
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(if (on) Color.White.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.05f))
+                            .clickable {
+                                choice = id
+                                with(PhoneSettings) { context.mochiOutfit = id }
+                            }
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        // A live preview of each one (auto previews what it picks today).
+                        val shown = if (id == "auto") Wardrobe.pick("auto", MochiMood.Idle) else Outfit.of(id) ?: Outfit.None
+                        MochiGlyph(size = 52.dp, mood = MochiMood.Idle, outfit = shown)
+                        Spacer(Modifier.height(4.dp))
+                        Text(label, color = Color.White.copy(alpha = if (on) 1f else 0.7f), fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+
+        Card("This phone") {
+            var id by remember { mutableStateOf(PhoneSettings.deviceId(context)) }
+            Text(
+                "What it calls itself on the laptop's link and in the presence server's heartbeat, so two phones can " +
+                    "share Mochi (he stays on the one in use). By default it comes from the model.",
+                color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                for (phone in Arbiter.PHONES.sorted()) {
+                    Button(
+                        onClick = { id = phone; PhoneSettings.saveDeviceId(context, phone); CoucouRuntime.apply(context) },
+                        enabled = id != phone,
+                    ) { Text(phone.uppercase()) }
+                }
+            }
+            Text("Now: ${id.uppercase()} (applies at the next start of the link).", color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp)
         }
 
         Card("1 · The phone's key") {

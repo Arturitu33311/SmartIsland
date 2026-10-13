@@ -29,9 +29,20 @@ data class Beat(
 data class Seen(val beat: Beat, val ageMs: Long)
 
 object Arbiter {
-    const val PHONE = "s21"
+    /** The phones that may join (each says which it is in its beats; the laptop relays them to one another). */
+    val PHONES = setOf("s21", "s22")
     const val LAPTOP = "laptop"
-    val KNOWN = setOf(PHONE, LAPTOP)
+    val KNOWN = PHONES + LAPTOP
+
+    /** Which phone this is, from its model, when the person has not said (SM-G998 = S21 Ultra, SM-S908 = S22 Ultra). */
+    fun idForModel(model: String?): String {
+        val m = (model ?: "").uppercase()
+        return when {
+            "G99" in m -> "s21"
+            "S90" in m -> "s22"
+            else -> "s21"
+        }
+    }
 
     /** A peer silent for longer than this is not there. */
     const val FRESH_MS = 15_000L

@@ -198,6 +198,7 @@ class AgentRemote(private val context: Context, private val scope: CoroutineScop
                     is RemoteMsg.Peer -> {
                         DeviceActivity.onPeer(context, msg.beat, msg.music, msg.news, msg.limit)
                     }
+                    is RemoteMsg.PeerGone -> DeviceActivity.onPeerGone(context, msg.device)
                     else -> {
                         model.apply(msg, lastHeard)
                         publish(AgentUi.Status.Connected)

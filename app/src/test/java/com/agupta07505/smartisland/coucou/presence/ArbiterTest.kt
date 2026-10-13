@@ -34,7 +34,7 @@ class ArbiterTest {
     }
 
     @Test
-    fun a_peer_beat_round_trips_and_only_the_laptop_may_send_one() {
+    fun a_peer_beat_round_trips_from_the_laptop_or_relayed_from_the_other_phone() {
         val line = JSONObject()
             .put("t", "peer").put("device", "laptop").put("idle", 12).put("screen_on", true)
             .put("server_ok", false).put("server_active", JSONObject.NULL).put("music", true).put("news", false)
@@ -43,13 +43,28 @@ class ArbiterTest {
         assertEquals(12L, msg.beat.idleS)
         assertTrue(msg.music)
         assertNull(msg.beat.serverActive)
-        // A beat that claims to be some other device is not a thing the link carries.
-        assertNull(RemoteProtocol.parse(line.replace("laptop", "s21"), 0L))
+        // The other phone's beat comes through the laptop under its own id.
+        val relayed = RemoteProtocol.parse(line.replace("laptop", "s22"), 0L) as RemoteMsg.Peer
+        assertEquals("s22", relayed.beat.device)
+        // A device we do not know is not a thing the link carries.
+        assertNull(RemoteProtocol.parse(line.replace("laptop", "vga"), 0L))
+        assertEquals(RemoteMsg.PeerGone("s22"), RemoteProtocol.parse("""{"t":"peer_gone","device":"s22"}""", 0L))
+        assertNull(RemoteProtocol.parse("""{"t":"peer_gone","device":"vga"}""", 0L))
         // An id we do not know is no server answer, and an absurd idle is clamped.
         val odd = JSONObject(line).put("server_active", "vga").put("idle", Long.MAX_VALUE).toString()
         val p = RemoteProtocol.parse(odd, 0L) as RemoteMsg.Peer
         assertNull(p.beat.serverActive)
         assertEquals(RemoteProtocol.MAX_IDLE_S, p.beat.idleS)
+    }
+
+    @Test
+    fun each_phone_knows_which_it_is_from_its_model() {
+        assertEquals("s21", Arbiter.idForModel("SM-G998U"))
+        assertEquals("s21", Arbiter.idForModel("SM-G998B"))
+        assertEquals("s22", Arbiter.idForModel("SM-S908U"))
+        assertEquals("s22", Arbiter.idForModel("SM-S908B/DS"))
+        assertEquals("s21", Arbiter.idForModel(null))
+        assertTrue(Arbiter.KNOWN.containsAll(listOf("s21", "s22", "laptop")))
     }
 
     @Test

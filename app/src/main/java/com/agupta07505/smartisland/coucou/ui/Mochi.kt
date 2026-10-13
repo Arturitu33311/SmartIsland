@@ -5,7 +5,11 @@
 
 package com.agupta07505.smartisland.coucou.ui
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -86,7 +90,14 @@ fun MochiGlyph(
     modifier: Modifier = Modifier,
     // Where he looks when glancing (bubble passes toward-main: +1 main is right, -1 left).
     lookX: Float = 0f,
+    // What he wears (see MochiWardrobe.kt); Outfit.None draws exactly what he always drew.
+    outfit: Outfit = Outfit.None,
 ) {
+    // The outfit goes on with a little overshoot, each time it changes.
+    val enter = remember(outfit) { Animatable(0f) }
+    LaunchedEffect(outfit) { if (outfit != Outfit.None) enter.animateTo(1f, tween(350)) }
+    val fit = if (outfit == Outfit.None) 1f else Wardrobe.fit(outfit)
+    val simplifiedOutfit = size < 40.dp
     val transition = rememberInfiniteTransition(label = "mochi")
     // Eyes open for ~3.6 s, shut for a blink of 0.15 s.
     val blink by transition.animateFloat(
@@ -193,8 +204,9 @@ fun MochiGlyph(
                 rotationZ = tilt
                 translationX = shiftX * size.toPx()
                 translationY = hop * size.toPx()
-                scaleX = scale * breathe
-                scaleY = scale * (if (dancing) 2f - breathe else 1f)
+                // (`fit` shrinks him with a big outfit on, so a witch's brim stays in his box.)
+                scaleX = scale * breathe * fit
+                scaleY = scale * (if (dancing) 2f - breathe else 1f) * fit
             },
     ) {
         val w = this.size.width
@@ -211,12 +223,37 @@ fun MochiGlyph(
             else -> 0f
         }
         val top = (h - bodyH) / 2f + lift
-        drawRoundRect(
-            color = tint,
-            topLeft = Offset(0f, top),
-            size = Size(w, bodyH),
-            cornerRadius = CornerRadius(bodyH * 0.42f, bodyH * 0.42f),
+        // The outfit is drawn on the head's ball (width = 2.28 R): its centre, the unit, and where he looks.
+        val head = Head(
+            R = w / 2.28f,
+            yaw = when {
+                glancing -> lookX * 0.45f
+                mood == MochiMood.Idle -> peek * 0.35f
+                dancing -> sin(wave) * 0.25f
+                else -> 0f
+            },
+            physDx = if (dancing) sin(wave) * 0.4f else if (celebrating) sin(wave) * 0.3f else 0f,
+            physDy = if (mood == MochiMood.Alert || mood == MochiMood.Happy) -bob * 0.15f else 0f,
+            simplified = simplifiedOutfit,
         )
+        val headCy = top + bodyH / 2f
+        val beatTime = beat * 1.4f
+        drawOutfitBehind(outfit, head, w / 2f, headCy, enter.value, beatTime)
+        if (outfit.recolorsBody()) {
+            drawRoundRect(
+                brush = androidx.compose.ui.graphics.Brush.verticalGradient(listOf(PumpkinTop, PumpkinBottom), startY = top, endY = top + bodyH),
+                topLeft = Offset(0f, top),
+                size = Size(w, bodyH),
+                cornerRadius = CornerRadius(bodyH * 0.42f, bodyH * 0.42f),
+            )
+        } else {
+            drawRoundRect(
+                color = tint,
+                topLeft = Offset(0f, top),
+                size = Size(w, bodyH),
+                cornerRadius = CornerRadius(bodyH * 0.42f, bodyH * 0.42f),
+            )
+        }
         val ink = Color(0xFF1B1B20)
         val eyeY = top + bodyH * 0.46f
         val lean = if (mood == MochiMood.Listening) w * 0.04f else 0f
@@ -270,6 +307,8 @@ fun MochiGlyph(
                 }
             }
         }
+        // In front of his eyes (glasses sit on them), under the badges and decorations.
+        drawOutfitFront(outfit, head, w / 2f, headCy, enter.value, beatTime, eyeDy = -0.1f * bodyH)
         if (mood == MochiMood.Error) {
             // A red dot over his head, like the laptop's error badge.
             drawCircle(Color(0xFFEF4444), radius = w * 0.06f, center = Offset(w * 0.5f, top - h * 0.02f))

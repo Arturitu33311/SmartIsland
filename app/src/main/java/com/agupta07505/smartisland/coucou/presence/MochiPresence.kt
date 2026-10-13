@@ -281,7 +281,7 @@ object MochiPresence {
         }
         if (screenOnTs <= 0L) screenOnTs = System.currentTimeMillis()
         val beat = JSONObject()
-            .put("device", "s21")
+            .put("device", DeviceActivity.myId)
             .put("idle_seconds", idleSeconds())
             .put("screen_on", true)
             .toString()

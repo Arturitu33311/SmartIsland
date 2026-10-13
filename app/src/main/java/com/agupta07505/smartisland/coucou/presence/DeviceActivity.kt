@@ -51,7 +51,15 @@ object DeviceActivity {
 
     private data class PeerState(val beat: Beat, val music: Boolean, val news: Boolean, val limit: Boolean, val at: Long)
 
-    @Volatile private var peer: PeerState? = null
+    /**
+     * Every other device that has been heard, by id: the laptop (over the link) and the other phone
+     * (its beats are relayed by the laptop, the only place the phones meet).
+     */
+    private val peers = java.util.concurrent.ConcurrentHashMap<String, PeerState>()
+
+    /** Which phone this is (s21, s22…). Set from the settings when the runtime starts. */
+    @Volatile var myId: String = Arbiter.idForModel(android.os.Build.MODEL)
+        private set
     @Volatile private var serverActive: String? = null
     @Volatile private var serverAt = 0L
     @Volatile private var previous: String? = null
@@ -64,6 +72,7 @@ object DeviceActivity {
     @Synchronized
     fun start(app: Context, scope: CoroutineScope) {
         appContext = app.applicationContext
+        myId = com.agupta07505.smartisland.coucou.phone.PhoneSettings.deviceId(app)
         val pm =app.getSystemService(Context.POWER_SERVICE) as PowerManager
         if (screenOnTs == 0L && pm.isInteractive) screenOnTs = System.currentTimeMillis()
         if (receiver == null) {
@@ -124,15 +133,21 @@ object DeviceActivity {
         recompute(app)
     }
 
-    /** The laptop's beat arrived over the link. */
+    /** A beat arrived over the link: the laptop's own, or the other phone's relayed by it. Our own is ignored. */
     fun onPeer(app: Context, beat: Beat, music: Boolean, news: Boolean, limit: Boolean = false) {
-        peer = PeerState(beat, music, news, limit, System.currentTimeMillis())
+        if (beat.device == myId || beat.device !in Arbiter.KNOWN) return
+        peers[beat.device] = PeerState(beat, music, news, limit, System.currentTimeMillis())
         recompute(app)
     }
 
-    /** The link to the laptop ended: it is not there until it says so again. */
+    /** The laptop says another phone left the link: it is not there until it beats again. */
+    fun onPeerGone(app: Context, device: String) {
+        if (peers.remove(device) != null) recompute(app)
+    }
+
+    /** The link to the laptop ended: nobody on it is heard any more (the other phone came through it). */
     fun onLinkDown(app: Context) {
-        peer = null
+        peers.clear()
         recompute(app)
     }
 
@@ -140,7 +155,7 @@ object DeviceActivity {
     fun myBeat(app: Context): Beat {
         val fresh = serverAt > 0 && System.currentTimeMillis() - serverAt <= SERVER_TTL_MS
         return Beat(
-            device = Arbiter.PHONE,
+            device = myId,
             idleS = idleSeconds(),
             screenOn = screenOn(app),
             serverOk = fresh,
@@ -151,8 +166,10 @@ object DeviceActivity {
     @Synchronized
     private fun recompute(app: Context) {
         val now = System.currentTimeMillis()
-        val p = peer
-        val seen = if (p != null) listOf(Seen(p.beat, now - p.at)) else emptyList()
+        val seen = peers.values.map { Seen(it.beat, now - it.at) }
+        // What the laptop itself hears and sees (the dance, the startle, the tired Mochi) comes from the
+        // laptop's own beats, not from the other phone's.
+        val p = peers[Arbiter.LAPTOP]
         val me = myBeat(app)
         val winner = Arbiter.decide(me, seen, previous)
         if (winner != previous) {
@@ -161,11 +178,13 @@ object DeviceActivity {
             android.util.Log.d(
                 "Presence",
                 "winner=$winner (was $previous) me[idle=${me.idleS} screen=${me.screenOn} srv=${me.serverOk}/${me.serverActive}] " +
-                    (p?.let { "peer[idle=${it.beat.idleS} age=${now - it.at}ms screen=${it.beat.screenOn} srv=${it.beat.serverOk}/${it.beat.serverActive}]" } ?: "peer[none]"),
+                    (peers.values.joinToString(" ") {
+                        "${it.beat.device}[idle=${it.beat.idleS} age=${now - it.at}ms screen=${it.beat.screenOn} srv=${it.beat.serverOk}/${it.beat.serverActive}]"
+                    }.ifEmpty { "peers[none]" }),
             )
         }
         previous = winner
-        _active.value = winner == Arbiter.PHONE
+        _active.value = winner == myId
         val alive = p != null && now - p.at <= Arbiter.FRESH_MS
         _peerMusic.value = alive && p != null && p.music
         _peerLimit.value = alive && p != null && p.limit

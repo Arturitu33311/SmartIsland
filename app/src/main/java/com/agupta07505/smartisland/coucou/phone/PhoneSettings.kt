@@ -37,6 +37,26 @@ object PhoneSettings {
         get() = prefs(this).getBoolean("jinxSync", false)
         set(v) = prefs(this).edit().putBoolean("jinxSync", v).apply()
 
+    /**
+     * Which phone this is (s21, s22…): what it calls itself in the beats the laptop relays and in the
+     * presence server's heartbeat. By default it comes from the model, so each phone is right without
+     * being told; Settings can fix it.
+     */
+    fun deviceId(c: Context): String {
+        val saved = prefs(c).getString("deviceId", null)
+        return saved?.takeIf { it in com.agupta07505.smartisland.coucou.presence.Arbiter.PHONES }
+            ?: com.agupta07505.smartisland.coucou.presence.Arbiter.idForModel(android.os.Build.MODEL)
+    }
+
+    fun saveDeviceId(c: Context, id: String) {
+        prefs(c).edit().putString("deviceId", id).apply()
+    }
+
+    /** What Mochi wears here: "auto" (the seasons, then what he is doing), "none" or an outfit id. */
+    var Context.mochiOutfit: String
+        get() = prefs(this).getString("mochiOutfit", "auto") ?: "auto"
+        set(v) = prefs(this).edit().putString("mochiOutfit", v).apply()
+
     /** Keep Mochi in the island, with the tasks (on by default). */
     var Context.showDesk: Boolean
         get() = prefs(this).getBoolean("showDesk", true)

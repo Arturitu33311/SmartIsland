@@ -153,7 +153,7 @@ fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modif
 
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            MochiGlyph(size = 38.dp, tint = tint, mood = mood)
+            MochiGlyph(size = 38.dp, tint = tint, mood = mood, outfit = rememberMochiOutfit(mood))
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(

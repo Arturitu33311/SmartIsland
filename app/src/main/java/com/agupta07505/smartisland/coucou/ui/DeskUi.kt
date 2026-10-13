@@ -100,7 +100,7 @@ private fun bubbleMood(lookDir: Float): BubbleMood {
 @Composable
 fun MochiBubble(size: Dp = 22.dp, lookDir: Float = 0f) {
     val b = bubbleMood(lookDir)
-    MochiGlyph(size, b.tint, b.mood, lookX = lookDir)
+    MochiGlyph(size, b.tint, b.mood, lookX = lookDir, outfit = rememberMochiOutfit(b.mood))
 }
 
 /** His bubble grown into a mini-pill (expanded island): him, with how many things are open. */
@@ -108,7 +108,7 @@ fun MochiBubble(size: Dp = 22.dp, lookDir: Float = 0f) {
 fun MochiBubblePill(lookDir: Float = 0f) {
     val b = bubbleMood(lookDir)
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        MochiGlyph(20.dp, b.tint, b.mood, lookX = lookDir)
+        MochiGlyph(20.dp, b.tint, b.mood, lookX = lookDir, outfit = rememberMochiOutfit(b.mood))
         if (b.open > 0) {
             Box(
                 Modifier.clip(RoundedCornerShape(50)).background(b.tint.copy(alpha = 0.22f))

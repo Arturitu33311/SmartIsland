@@ -49,6 +49,8 @@ sealed class RemoteMsg {
     data class Tasks(val json: String) : RemoteMsg()
     /** The laptop's own beat: how recently it was used, whether it reaches the server, what it hears and sees. */
     data class Peer(val beat: Beat, val music: Boolean, val news: Boolean, val limit: Boolean = false) : RemoteMsg()
+    /** The laptop says another phone left the link. */
+    data class PeerGone(val device: String) : RemoteMsg()
     data object Pong : RemoteMsg()
     data object Disabled : RemoteMsg()
     data object Offline : RemoteMsg()
@@ -72,10 +74,12 @@ object RemoteProtocol {
             "resolved" -> RemoteMsg.Resolved(s("request_id"), s("decision"))
             "ack" -> RemoteMsg.Ack(o.optBoolean("ok"), o.optString("request_id").takeIf { it.isNotEmpty() }, o.optString("why").takeIf { it.isNotEmpty() })
             "tasks" -> o.optJSONArray("tasks")?.let { RemoteMsg.Tasks(it.toString()) }
+            "peer_gone" -> o.optString("device").takeIf { it in Arbiter.KNOWN }?.let { RemoteMsg.PeerGone(it) }
             "peer" -> {
-                // Only the laptop speaks on this link, and only in terms of the two ids we know.
+                // Only the laptop speaks on this link: its own beat, and the other phone's relayed by
+                // it. Only in terms of ids we know (DeviceActivity ignores this phone's own).
                 val device = o.optString("device")
-                if (device != Arbiter.LAPTOP) null
+                if (device !in Arbiter.KNOWN) null
                 else RemoteMsg.Peer(
                     Beat(
                         device = device,
