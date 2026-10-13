@@ -66,8 +66,8 @@ object Ssh {
         return "SHA256:" + Base64.getEncoder().withoutPadding().encodeToString(MessageDigest.getInstance("SHA-256").digest(blob))
     }
 
-    private fun newClient(verifier: HostKeyVerifier): SSHClient = SSHClient(DefaultConfig()).apply {
-        connectTimeout = CONNECT_MS
+    private fun newClient(verifier: HostKeyVerifier, connectMs: Int = CONNECT_MS): SSHClient = SSHClient(DefaultConfig()).apply {
+        connectTimeout = connectMs
         timeout = IO_MS
         addHostKeyVerifier(verifier)
     }
@@ -97,12 +97,12 @@ object Ssh {
     }
 
     /** A connection, logged in with the phone's key; the host key must be the one pinned at pairing. */
-    fun open(context: Context, profile: SshProfile): Connection {
+    fun open(context: Context, profile: SshProfile, connectTimeoutMs: Int = CONNECT_MS): Connection {
         if (!profile.paired) throw SshException("Not paired: pair ${profile.host.ifBlank { "the host" }} in Coucou's phone settings")
         val client = newClient(object : HostKeyVerifier {
             override fun verify(hostname: String?, port: Int, key: PublicKey) = fingerprint(key) == profile.hostKey
             override fun findExistingAlgorithms(hostname: String?, port: Int): List<String> = emptyList()
-        })
+        }, connectTimeoutMs)
         try {
             client.connect(profile.host, profile.port)
             client.connection.keepAlive.keepAliveInterval = 15
