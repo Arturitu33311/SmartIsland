@@ -12,16 +12,17 @@ import com.agupta07505.smartisland.data.SmartIslandSettings
  * Keeps a dark island readable on a dark screen. A black pill on a black status bar has no edge (a
  * black shadow does nothing there), so only its icons show. When this is on, the pill keeps its
  * fill and gets a hairline of light that is strongest along the top, like light catching the rim
- * of a glass object, and fades to almost nothing at the bottom.
+ * of a glass object, and eases off along the sides but never vanishes: the bottom edge has to be
+ * seen as well, or the pill seems to melt into the screen below it.
  */
 object EdgeContrast {
     /** Below this relative luminance the pill counts as dark (a chosen colour like navy still does). */
     const val DARK_LUMINANCE = 0.08f
 
     /** The rim's strength at the top, middle and bottom of the pill. */
-    const val RIM_TOP_ALPHA = 0.30f
-    const val RIM_MID_ALPHA = 0.10f
-    const val RIM_BOTTOM_ALPHA = 0.04f
+    const val RIM_TOP_ALPHA = 0.34f
+    const val RIM_MID_ALPHA = 0.20f
+    const val RIM_BOTTOM_ALPHA = 0.17f
 
     /** [mode] is one of [SmartIslandSettings.EDGE_CONTRAST_AUTO]/ALWAYS/NEVER (unknown reads as auto). */
     fun shouldApply(mode: String, systemDark: Boolean, pillLuminance: Float): Boolean = when (mode) {

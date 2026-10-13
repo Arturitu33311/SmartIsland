@@ -122,7 +122,12 @@ fun IslandOverlayView(
     isInputActive: Boolean = false,
     onReplyStateChanged: (Boolean) -> Unit = {},
     onDismissAllNotifications: () -> Unit = {},
-    isFullWidth: Boolean = true
+    isFullWidth: Boolean = true,
+    // How far the overlay window's centre sits from the screen's centre, in px: 0 for a full-width
+    // window, the group's offset for the pill-sized one. All the geometry below is worked out against
+    // the screen's centre, and this one number (which changes in the same moment as the window does)
+    // places it inside whichever window there is, so nothing has to glide when the window resizes.
+    windowShiftPx: Int = 0
 ) {
     // Fix #1: rememberUpdatedState ensures the lambda is always fresh
     // even though pointerInput(Unit) never restarts its coroutine
@@ -158,8 +163,10 @@ fun IslandOverlayView(
     ).dp
     val transition = updateTransition(targetState = expanded, label = "islandTransition")
 
+    // Closing is critically damped: the pill glides to rest. With any bounce its width overshoots
+    // and comes back, which reads as the island swaying left and right as it shrinks.
     val sizeSpec = spring<androidx.compose.ui.unit.Dp>(
-        dampingRatio = 0.72f,
+        dampingRatio = 1f,
         stiffness = 520f
     )
     // Opening bounces a touch (Apple-style overshoot); closing stays calm so it never wobbles away.
@@ -168,7 +175,7 @@ fun IslandOverlayView(
         stiffness = 480f
     )
     val sizeSpecFloat = spring<Float>(
-        dampingRatio = 0.72f,
+        dampingRatio = 1f,
         stiffness = 520f
     )
     val expandSpecFloat = spring<Float>(
@@ -176,7 +183,7 @@ fun IslandOverlayView(
         stiffness = 480f
     )
     val heightSpec = spring<androidx.compose.ui.unit.Dp>(
-        dampingRatio = 0.76f,
+        dampingRatio = 1f,
         stiffness = 520f
     )
     val alphaSpec = tween<Float>(
@@ -247,10 +254,8 @@ fun IslandOverlayView(
 
     val collapsedMainOffset = if (settings.enableNotchMode) {
         settings.xOffset.dp
-    } else if (isFullWidth) {
-        mainCenter - screenCenter
     } else {
-        mainCenter - groupCenter
+        mainCenter - screenCenter
     }
     val expandedTopOffset = calculateExpandedTopOffset(
         enableNotchMode = settings.enableNotchMode,
@@ -392,7 +397,7 @@ fun IslandOverlayView(
     )
     val secondaryBubbleWidth by animateDpAsState(
         targetValue = if (secondaryIsPill) miniPillWidth else circleSize,
-        animationSpec = spring(dampingRatio = 0.75f, stiffness = 520f),
+        animationSpec = spring(dampingRatio = if (expanded) 0.75f else 1f, stiffness = 520f),
         label = "secondaryBubbleWidth"
     )
     val secondaryPillProgress = (miniPillWidth - circleSize).value.let { widthDelta ->
@@ -404,7 +409,7 @@ fun IslandOverlayView(
     }
     val secondaryBubbleCorner by animateDpAsState(
         targetValue = if (secondaryIsPill) settings.cornerRadius.dp else circleSize / 2f,
-        animationSpec = spring(dampingRatio = 0.75f, stiffness = 520f),
+        animationSpec = spring(dampingRatio = if (expanded) 0.75f else 1f, stiffness = 520f),
         label = "secondaryBubbleCorner"
     )
     val tertiaryNotification = if (!settings.enableNotchMode && notifications.size >= 3) {
@@ -430,15 +435,11 @@ fun IslandOverlayView(
     )
 
     val expandedCompactX = collapsedMainLeft
-    val collapsedSecondaryOffset = if (isFullWidth) {
-        circleCenter - screenCenter
-    } else {
-        circleCenter - groupCenter
-    }
+    val collapsedSecondaryOffset = circleCenter - screenCenter
     val secondaryExpandedOffset = calculateSecondaryExpandedOffset(
         secondaryIsPill = secondaryIsPill,
         isCircleLeft = isCircleLeft,
-        isFullWidth = isFullWidth,
+        isFullWidth = true,
         expandedCompactX = expandedCompactX.value,
         screenCenter = screenCenter.value,
         miniPillWidth = miniPillWidth.value,
@@ -447,7 +448,7 @@ fun IslandOverlayView(
     ).dp
     val secondaryOffset by animateDpAsState(
         targetValue = if (!expanded) collapsedSecondaryOffset else secondaryExpandedOffset,
-        animationSpec = spring(dampingRatio = 0.75f, stiffness = 520f),
+        animationSpec = spring(dampingRatio = if (expanded) 0.75f else 1f, stiffness = 520f),
         label = "secondaryOffset"
     )
 
@@ -479,7 +480,7 @@ fun IslandOverlayView(
                     .width(settings.width.dp)
                     .height(settings.height.dp)
                     .graphicsLayer {
-                        translationX = collapsedMainOffset.toPx()
+                        translationX = collapsedMainOffset.toPx() - windowShiftPx
                     }
                     .pointerInput(Unit) {
                         detectTapGestures {
@@ -539,7 +540,7 @@ fun IslandOverlayView(
                     // top-center-aligned box makes a near-zero-width pill drift
                     // left/right at the very start/end of the morph (reads as flicker).
                     val widthPx = size.width
-                    translationX = animatedXOffset.toPx() + (if (!currentExpanded) pillDragOffsetX else 0f)
+                    translationX = animatedXOffset.toPx() - windowShiftPx + (if (!currentExpanded) pillDragOffsetX else 0f)
                     scaleX = if (widthPx > 0f) switchScaleAnim.value else 1f
                     scaleY = if (widthPx > 0f) switchScaleAnim.value else 1f
                     translationY = yOffset.toPx() + dragOffset
@@ -994,7 +995,7 @@ fun IslandOverlayView(
                 modifier = Modifier
                     .absoluteOffset {
                         IntOffset(
-                            secondaryOffset.roundToPx(),
+                            secondaryOffset.roundToPx() - windowShiftPx,
                             0
                         )
                     }

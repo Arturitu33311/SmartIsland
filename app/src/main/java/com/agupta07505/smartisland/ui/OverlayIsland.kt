@@ -30,6 +30,7 @@ fun OverlayIsland(
     onOpenNotificationShade: () -> Unit = {},
     modifier: Modifier = Modifier,
     isFullWidth: Boolean = true,
+    windowShiftPx: Int = 0,
     // False while the overlay window is being resized (see SmartIslandOverlayService): the expand
     // animation waits for it instead of starting inside a window that is about to change size.
     windowReady: Boolean = true
@@ -112,6 +113,7 @@ fun OverlayIsland(
         isInputActive = isInputActive,
         onReplyStateChanged = { viewModel.setInputActive(it) },
         isFullWidth = isFullWidth,
+        windowShiftPx = windowShiftPx,
         modifier = modifier
     )
 }

@@ -84,6 +84,10 @@ class SmartIslandOverlayService : AccessibilityService() {
     // resized, and shown again once frames at the new size have been drawn. [windowReady] holds the
     // expand animation back until then, so it starts from a window that is already the right size.
     private val windowReady = MutableStateFlow(true)
+
+    // Where the window's centre is from the screen's centre (px; 0 when it is full width), published
+    // in the same moment the window is resized so the Compose geometry follows it exactly.
+    private val windowShiftPx = MutableStateFlow(0)
     private var maskJob: kotlinx.coroutines.Job? = null
     private var pendingParams: WindowManager.LayoutParams? = null
     private var lastParams: WindowManager.LayoutParams? = null
@@ -500,6 +504,7 @@ class SmartIslandOverlayService : AccessibilityService() {
                 setContent {
                     val fullWidth by isTouchableRegionSupported.collectAsState()
                     val ready by windowReady.collectAsState()
+                    val shift by windowShiftPx.collectAsState()
                     OverlayIsland(
                         viewModel = this@SmartIslandOverlayService.viewModel,
                         statusBarHeight = statusBarHeight,
@@ -511,6 +516,7 @@ class SmartIslandOverlayService : AccessibilityService() {
                             viewModel.collapse()
                         },
                         isFullWidth = fullWidth,
+                        windowShiftPx = shift,
                         windowReady = ready
                     )
                 }
@@ -764,6 +770,11 @@ class SmartIslandOverlayService : AccessibilityService() {
         runCatchingLogged(TAG, "Failed to update view layout") {
             windowManager.updateViewLayout(view, params)
         }
+        publishWindowShift(params)
+    }
+
+    private fun publishWindowShift(p: WindowManager.LayoutParams) {
+        windowShiftPx.value = if (p.width == WindowManager.LayoutParams.MATCH_PARENT) 0 else p.x
     }
 
     /**
@@ -793,6 +804,7 @@ class SmartIslandOverlayService : AccessibilityService() {
                 kotlinx.coroutines.delay(WINDOW_MASK_BEFORE_MS)
                 pendingParams?.let { p ->
                     runCatchingLogged(TAG, "Failed to update view layout") { windowManager.updateViewLayout(view, p) }
+                    publishWindowShift(p)
                 }
                 // ...and two more at the new size before he is shown again.
                 kotlinx.coroutines.delay(WINDOW_MASK_AFTER_MS)
@@ -920,6 +932,7 @@ class SmartIslandOverlayService : AccessibilityService() {
             }
         }.also {
             lastParams = it
+            publishWindowShift(it)
         }
     }
 
