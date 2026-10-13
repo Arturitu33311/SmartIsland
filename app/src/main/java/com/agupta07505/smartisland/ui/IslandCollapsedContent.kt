@@ -25,6 +25,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -98,6 +99,16 @@ fun IslandCollapsedContent(
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
+    // What the right-hand slot may use without going under the camera hole (null: no hole to avoid).
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val freeRightDp = remember(settings.width, settings.xOffset) {
+        com.agupta07505.smartisland.util.CameraCutoutDetector.freeRightDp(
+            pillWidthDp = settings.width,
+            pillXOffsetDp = settings.xOffset,
+            cutout = com.agupta07505.smartisland.util.CameraCutoutDetector.detect(context),
+            padEndDp = RIGHT_SLOT_PADDING_END_DP.toFloat(),
+        )
+    }
     val maxTranslationPx = with(density) { COLLAPSED_TRANSLATION_MAX_DP.toPx() }
     val translationProgress = 1f - collapsedAlpha
     val translationXLeft = translationProgress * maxTranslationPx
@@ -242,6 +253,7 @@ fun IslandCollapsedContent(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
                 .padding(end = RIGHT_SLOT_PADDING_END_DP.dp)
+                .then(if (freeRightDp != null) Modifier.widthIn(max = freeRightDp.dp) else Modifier)
                 .graphicsLayer {
                     translationX = translationXRight
                 },

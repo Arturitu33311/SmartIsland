@@ -71,6 +71,29 @@ object CameraCutoutDetector {
         )
     }
 
+    /** Never ask a slot to be narrower than this: an icon and a little air. */
+    const val MIN_SLOT_DP = 20f
+
+    /**
+     * The width, in dp, the pill's right-hand slot may use so nothing of it lands under the camera hole:
+     * from the hole's right edge to the pill's right edge, less its padding and a small gap. Null when the
+     * device has no hole to avoid. [pillXOffsetDp] is where the pill sits from the screen's centre; the
+     * detector's own width carries 24 dp of padding that is not hole.
+     */
+    fun freeRightDp(
+        pillWidthDp: Float,
+        pillXOffsetDp: Float,
+        cutout: DetectedCutoutInfo,
+        padEndDp: Float,
+        gapDp: Float = 6f
+    ): Float? {
+        if (!cutout.hasHardwareCutout) return null
+        val holeHalf = ((cutout.widthDp - 24f) / 2f).coerceAtLeast(0f)
+        val holeCentreFromPill = cutout.xOffsetDp - pillXOffsetDp
+        val free = pillWidthDp / 2f - (holeCentreFromPill + holeHalf) - padEndDp - gapDp
+        return free.coerceAtLeast(MIN_SLOT_DP)
+    }
+
     /**
      * Calculates the physical pill position and dimensions matching the device's camera cutout rect.
      */

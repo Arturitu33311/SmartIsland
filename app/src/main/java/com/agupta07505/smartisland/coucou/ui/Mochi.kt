@@ -115,15 +115,12 @@ fun MochiGlyph(
         mood == MochiMood.Dancing -> 0.22f
         mood == MochiMood.Sleepy -> 0.22f
         else -> 0f
-    }.let { if (it > 0f) it + 0.06f else 0f }
-    // His body spans 0.78 of the box; shrink the whole picture just enough to fit it plus that room
-    // (never more than his outfit already needs), and slide it down so its top touches the box.
-    val targetFit = if (roomNeeded > 0f) minOf(rawFit, 1f / (0.78f + roomNeeded)) else rawFit
+    }.let { GlyphFit.need(it) }
+    // Shrink the whole picture just enough to fit his body plus that room (never more than his outfit
+    // already needs), and slide it down so its top touches the box (see GlyphFit).
+    val targetFit = GlyphFit.target(rawFit, roomNeeded)
     val fit by animateFloatAsState(targetFit, tween(220), label = "fit")
-    val drop by animateFloatAsState(
-        if (roomNeeded > 0f) (-0.5f + targetFit * (0.39f + roomNeeded)).coerceAtLeast(0f) else 0f,
-        tween(220), label = "drop",
-    )
+    val drop by animateFloatAsState(GlyphFit.drop(targetFit, roomNeeded), tween(220), label = "drop")
     val small = simplifiedOutfit
     val transition = rememberInfiniteTransition(label = "mochi")
     // Eyes open for ~3.6 s, shut for a blink of 0.15 s.

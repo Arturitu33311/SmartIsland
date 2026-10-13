@@ -223,7 +223,10 @@ object IslandAgents {
                     title = (s.project.ifEmpty { "Claude Code" }) + if (busy.size > 1) "  +${busy.size - 1}" else "",
                     // What it is doing, in words ("Editing Mochi.kt"); its kind rides in the category so the
                     // collapsed pill can wear the matching face and colour.
-                    text = com.agupta07505.smartisland.coucou.agents.AgentActivity.of(s.tool, s.detail, s.state).line,
+                    text = com.agupta07505.smartisland.coucou.ui.activityLine(
+                        context,
+                        com.agupta07505.smartisland.coucou.agents.AgentActivity.of(s.tool, s.detail, s.state),
+                    ),
                     timeMillis = s.updatedAt,
                     mode = IslandMode.Agent,
                     category = if (attention) AGENT_NEEDS_YOU

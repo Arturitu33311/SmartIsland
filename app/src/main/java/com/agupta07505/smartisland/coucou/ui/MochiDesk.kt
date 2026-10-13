@@ -4,21 +4,26 @@
 
 package com.agupta07505.smartisland.coucou.ui
 
-import androidx.compose.animation.Crossfade
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -35,8 +40,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -49,41 +55,61 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.agupta07505.smartisland.R
 import com.agupta07505.smartisland.coucou.CoucouRuntime
 import com.agupta07505.smartisland.coucou.CoucouTask
 import com.agupta07505.smartisland.coucou.CoucouTasks
+import com.agupta07505.smartisland.coucou.SnoozePresets
+import com.agupta07505.smartisland.coucou.TaskParser
+import com.agupta07505.smartisland.coucou.TaskPreview
+import com.agupta07505.smartisland.coucou.WhenDay
 import com.agupta07505.smartisland.coucou.touchIsland
-import com.agupta07505.smartisland.coucou.phone.PhoneSettings.jinxSync
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
+import kotlin.math.roundToInt
 
 val JinxGreen = Color(0xFF39FF14)
 private val Done = Color(0xFF4ADE80)
 
+/** The grey of the small lines: 62 % white on the island's black reads at 4.5:1 or better. */
+private val Secondary = Color.White.copy(alpha = 0.62f)
+
+/** What the person just did to a task, offered back for a few seconds (Undo) or only confirmed. */
+private data class Note(val id: String, val title: String, val canUndo: Boolean, val until: Long)
+
+private const val NOTE_MS = 4_500L
+
+/** How far a row is dragged before letting go snoozes it. */
+private const val SNOOZE_DRAG_PX = 160f
+
 /**
  * Mochi's desk: what you open the island to find when nothing else is going on. Mochi, your open
- * tasks (a tap finishes one and makes him smile), what Jinx holds that you have not told her about,
- * and a place to add one without leaving the island. He is asleep when there is nothing to do, and
- * looks up when something is overdue.
+ * tasks (a tap finishes one and makes him smile; a swipe snoozes it, a long press rewords it), and a
+ * place to add one without leaving the island. He is awake by day and looks up when something is overdue.
  */
 @Composable
 fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val tasks by CoucouTasks.state.collectAsState()
-    val jinx by CoucouRuntime.jinx.collectAsState()
     var smileUntil by remember { mutableLongStateOf(0L) }
     var adding by remember { mutableStateOf(false) }
+    var editingId by remember { mutableStateOf<String?>(null) }
     var input by remember { mutableStateOf("") }
     var picking by remember { mutableStateOf(false) }
+    var note by remember { mutableStateOf<Note?>(null) }
     val whenState = rememberWhenState()
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var tickles by remember { mutableIntStateOf(0) }
@@ -108,6 +134,12 @@ fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modif
             delay((smileUntil - System.currentTimeMillis()).coerceAtLeast(0))
             now = System.currentTimeMillis()
         }
+    }
+    // What was just done is offered back (Undo) for a few seconds, then forgotten.
+    LaunchedEffect(note) {
+        val n = note ?: return@LaunchedEffect
+        delay((n.until - System.currentTimeMillis()).coerceAtLeast(0))
+        if (note === n) note = null
     }
     // The keyboard needs the island's window to take focus first (what a quick reply does).
     LaunchedEffect(adding) {
@@ -142,28 +174,32 @@ fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modif
     }
     val tint = if (overdue > 0) ReminderAmber else MochiEmerald
 
+    fun reset() {
+        input = ""
+        adding = false
+        editingId = null
+        picking = false
+        whenState.reset()
+        onReplyStateChanged(false)
+    }
+
     // The calendar choice rides along with the sentence: the day picked wins, the sentence's
     // time of day is kept ("viernes a las 17:30"). Both are cleared after adding, so the next
     // task starts clean instead of inheriting yesterday's day.
     fun submit() {
         touchIsland(context)
         val text = input.trim()
+        val editing = editingId
         if (text.isNotEmpty()) {
-            runCatching { CoucouTasks.add(context, text, pickedDay = whenState.dayStart, pickedHour = whenState.hour) }
+            runCatching {
+                if (editing != null) {
+                    CoucouTasks.edit(context, editing, text)
+                } else {
+                    CoucouTasks.add(context, text, pickedDay = whenState.dayStart, pickedHour = whenState.hour)
+                }
+            }
         }
-        input = ""
-        adding = false
-        picking = false
-        whenState.reset()
-        onReplyStateChanged(false)
-    }
-
-    fun cancel() {
-        input = ""
-        adding = false
-        picking = false
-        whenState.reset()
-        onReplyStateChanged(false)
+        reset()
     }
 
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -188,14 +224,23 @@ fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modif
                 val next = open.firstOrNull { it.remindAt != null && it.remindAt * 1000 >= now }
                 val hour = java.util.Calendar.getInstance().apply { timeInMillis = now }.get(java.util.Calendar.HOUR_OF_DAY)
                 // What he says is the headline; the count and the next timed task ride underneath.
+                val phrase = MochiIdleScript.phraseAt(MochiIdleScript.phrases(open.size, overdue, hour), phraseStep)
+                val phraseArg = phrase?.arg
                 val headline = when {
-                    smileUntil > now -> "Nice!"
-                    mood == MochiMood.Dancing -> "♪ dancing"
-                    mood == MochiMood.Sleepy -> "Mochi está durmiendo 💤"
-                    else -> MochiIdleScript.phraseAt(MochiIdleScript.phrases(open.size, overdue, hour), phraseStep)
+                    smileUntil > now -> stringResource(R.string.coucou_desk_nice)
+                    mood == MochiMood.Dancing -> stringResource(R.string.coucou_desk_dancing)
+                    mood == MochiMood.Sleepy -> stringResource(R.string.coucou_desk_sleeping)
+                    phrase == null -> ""
+                    phraseArg != null -> stringResource(phrase.res, phraseArg)
+                    else -> stringResource(phrase.res)
                 }
-                val status = MochiIdleScript.deskStatus(open.size, overdue) +
-                    (next?.let { " · ${time(it.remindAt!!)}  ${it.title}" } ?: "")
+                val count = when (MochiIdleScript.statusKind(open.size, overdue)) {
+                    MochiIdleScript.StatusKind.Overdue ->
+                        context.resources.getQuantityString(R.plurals.coucou_desk_overdue, overdue, overdue)
+                    MochiIdleScript.StatusKind.Clear -> stringResource(R.string.coucou_desk_all_clear)
+                    MochiIdleScript.StatusKind.Todo -> stringResource(R.string.coucou_desk_todo, open.size)
+                }
+                val status = count + (next?.let { " · ${time(it.remindAt!!)}  ${it.title}" } ?: "")
                 Crossfade(targetState = headline, label = "desk-headline") { line ->
                     Text(
                         line,
@@ -205,7 +250,7 @@ fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modif
                 }
                 Text(
                     status,
-                    color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    color = Secondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }
         }
@@ -221,9 +266,64 @@ fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modif
                     CoucouTasks.setDone(context, t.id, true)
                     smileUntil = System.currentTimeMillis() + 1600
                     now = System.currentTimeMillis()
+                    note = Note(t.id, t.title, canUndo = true, until = System.currentTimeMillis() + NOTE_MS)
+                },
+                onSnooze = {
+                    touchIsland(context)
+                    Haptics.tap(context)
+                    CoucouTasks.snooze(context, t.id, SnoozePresets.SHORT_S)
+                    now = System.currentTimeMillis()
+                    note = Note(t.id, t.title, canUndo = false, until = System.currentTimeMillis() + NOTE_MS)
+                },
+                onEdit = {
+                    touchIsland(context)
+                    Haptics.tap(context)
+                    editingId = t.id
+                    input = t.title
+                    adding = true
+                    picking = false
+                    onReplyStateChanged(true)
                 },
             )
         }
+
+        // What was just done, offered back; a snooze is only confirmed.
+        AnimatedVisibility(
+            visible = note != null,
+            enter = fadeIn(tween(120)) + expandVertically(tween(160)),
+            exit = fadeOut(tween(120)) + shrinkVertically(tween(160)),
+        ) {
+            val n = note
+            if (n != null) {
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Done.copy(alpha = 0.10f))
+                        .padding(start = 12.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        stringResource(if (n.canUndo) R.string.coucou_desk_done_task else R.string.coucou_desk_snoozed_task, n.title),
+                        color = Color.White.copy(alpha = 0.85f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f).padding(vertical = 8.dp),
+                    )
+                    if (n.canUndo) {
+                        Text(
+                            stringResource(R.string.coucou_desk_undo),
+                            color = Done, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .clickable {
+                                    touchIsland(context)
+                                    Haptics.tap(context)
+                                    CoucouTasks.setDone(context, n.id, false)
+                                    note = null
+                                }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                        )
+                    }
+                }
+            }
+        }
+
         if (!adding) {
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.07f))
@@ -232,7 +332,7 @@ fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modif
             ) {
                 Text("＋", color = MochiEmerald, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.width(8.dp))
-                Text("Add a task", color = Color.White.copy(alpha = 0.55f), fontSize = 13.sp)
+                Text(stringResource(R.string.coucou_desk_add), color = Secondary, fontSize = 13.sp)
             }
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -242,7 +342,9 @@ fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modif
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Box(Modifier.weight(1f)) {
-                        if (input.isEmpty()) Text("llamar a mamá a las 17:30…", color = Color.White.copy(alpha = 0.35f), fontSize = 13.sp, maxLines = 1)
+                        if (input.isEmpty()) {
+                            Text(stringResource(R.string.coucou_desk_hint), color = Color.White.copy(alpha = 0.55f), fontSize = 13.sp, maxLines = 1)
+                        }
                         BasicTextField(
                             value = input,
                             onValueChange = { input = it },
@@ -254,16 +356,58 @@ fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modif
                             modifier = Modifier.fillMaxWidth().focusRequester(focus),
                         )
                     }
-                    WhenCalendarButton(picked = whenState.dayStart != null) {
-                        touchIsland(context)
-                        picking = !picking
+                    if (editingId == null) {
+                        WhenCalendarButton(picked = whenState.dayStart != null) {
+                            touchIsland(context)
+                            picking = !picking
+                        }
                     }
                     Icon(
-                        Icons.Rounded.Close, "Cancel", tint = Color.White.copy(alpha = 0.5f),
-                        modifier = Modifier.size(20.dp).clip(CircleShape).clickable { touchIsland(context); cancel() },
+                        Icons.Rounded.Close, stringResource(R.string.coucou_desk_cancel), tint = Secondary,
+                        modifier = Modifier.size(20.dp).clip(CircleShape).clickable { touchIsland(context); reset() },
                     )
                 }
-                if (picking) WhenPickerPanel(whenState)
+                // What the sentence will become, before it is confirmed: the time it was understood as.
+                val understood = remember(input, whenState.dayStart, whenState.hour, editingId) {
+                    if (input.isBlank()) {
+                        null
+                    } else {
+                        val offset = { t: Long -> TimeZone.getDefault().getOffset(t * 1000) / 1000L }
+                        val nowSec = System.currentTimeMillis() / 1000
+                        val parsed = TaskParser.parseWhen(input, nowSec, offset)
+                        val picked = whenState.dayStart
+                        val at = if (picked != null && editingId == null) {
+                            TaskParser.withDay(picked, parsed.whenSec, whenState.hour, offset)
+                        } else {
+                            parsed.whenSec
+                        }
+                        TaskPreview.label(at, nowSec) { t -> TimeZone.getDefault().getOffset(t * 1000) / 1000L }
+                    }
+                }
+                AnimatedVisibility(visible = understood != null, enter = fadeIn(tween(120)), exit = fadeOut(tween(100))) {
+                    val label = understood
+                    if (label != null) {
+                        val clock = "%02d:%02d".format(label.hour, label.minute)
+                        val text = when (label.day) {
+                            WhenDay.Today -> stringResource(R.string.coucou_when_today, clock)
+                            WhenDay.Tomorrow -> stringResource(R.string.coucou_when_tomorrow, clock)
+                            WhenDay.Other -> stringResource(
+                                R.string.coucou_when_other,
+                                SimpleDateFormat("EEE d MMM HH:mm", Locale.getDefault()).format(Date(label.atSec * 1000)),
+                            )
+                        }
+                        Row(
+                            Modifier.clip(RoundedCornerShape(50)).background(MochiEmerald.copy(alpha = 0.16f))
+                                .padding(horizontal = 10.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("⏰", fontSize = 11.sp)
+                            Spacer(Modifier.width(6.dp))
+                            Text(text, color = MochiEmerald, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                }
+                if (picking && editingId == null) WhenPickerPanel(whenState)
             }
         }
     }
@@ -271,14 +415,25 @@ fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modif
 
 private fun time(unixSec: Long): String = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(unixSec * 1000))
 
+/**
+ * One open task. Tick the circle to finish it (it fills, then the row folds away, then it is done); drag
+ * the row to the right to snooze it ten minutes; hold it to reword it.
+ */
 @Composable
-private fun TaskRow(t: CoucouTask, onCheck: () -> Unit, onDone: () -> Unit) {
+private fun TaskRow(
+    t: CoucouTask,
+    onCheck: () -> Unit,
+    onDone: () -> Unit,
+    onSnooze: () -> Unit,
+    onEdit: () -> Unit,
+) {
     val late = t.remindAt != null && t.remindAt * 1000 < System.currentTimeMillis()
     val reduced = rememberReducedMotion()
     // Checked first (the circle fills with a tick), then the row folds away, then the task is really done:
     // what you did is acknowledged, instead of the line vanishing.
     var checked by remember(t.id) { mutableStateOf(false) }
     var gone by remember(t.id) { mutableStateOf(false) }
+    var drag by remember(t.id) { mutableFloatStateOf(0f) }
     LaunchedEffect(checked) {
         if (checked) {
             delay(if (reduced) 0L else 150L)
@@ -288,34 +443,69 @@ private fun TaskRow(t: CoucouTask, onCheck: () -> Unit, onDone: () -> Unit) {
         }
     }
     val fill by animateColorAsState(if (checked) Done else Color.Transparent, tween(120), label = "check-fill")
+    val reveal = (drag / SNOOZE_DRAG_PX).coerceIn(0f, 1f)
     AnimatedVisibility(
         visible = !gone,
         exit = shrinkVertically(tween(if (reduced) 0 else 180)) + fadeOut(tween(if (reduced) 0 else 150)),
     ) {
-        Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = 0.05f)).padding(horizontal = 8.dp, vertical = 5.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                Modifier.size(22.dp).clip(CircleShape).background(fill)
-                    .border(1.6.dp, if (checked) Done else if (late) ReminderAmber else Color.White.copy(alpha = 0.4f), CircleShape)
-                    .clickable(enabled = !checked) {
-                        onCheck()
-                        checked = true
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                if (checked) Icon(Icons.Rounded.Check, null, tint = Color(0xFF0B1F12), modifier = Modifier.size(14.dp))
+        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))) {
+            // What the swipe will do, uncovered as the row slides.
+            if (drag > 0f) {
+                Row(
+                    Modifier.matchParentSize().background(ReminderAmber.copy(alpha = 0.10f + 0.20f * reveal)).padding(start = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        stringResource(R.string.coucou_desk_snooze_hint),
+                        color = ReminderAmber.copy(alpha = 0.55f + 0.45f * reveal), fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
-            Spacer(Modifier.width(10.dp))
-            Text(
-                t.title,
-                color = Color.White.copy(alpha = if (checked) 0.5f else 1f), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            t.remindAt?.let {
-                Text("⏰ ${time(it)}", color = if (late) ReminderAmber else Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
-                Spacer(Modifier.width(4.dp))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .offset { IntOffset(drag.roundToInt(), 0) }
+                    .background(Color(0xFF0E0E0F))
+                    .background(Color.White.copy(alpha = 0.05f))
+                    .pointerInput(t.id) {
+                        detectHorizontalDragGestures(
+                            onDragEnd = {
+                                if (drag >= SNOOZE_DRAG_PX) onSnooze()
+                                drag = 0f
+                            },
+                            onDragCancel = { drag = 0f },
+                        ) { change, amount ->
+                            change.consume()
+                            drag = (drag + amount).coerceIn(0f, SNOOZE_DRAG_PX * 1.4f)
+                        }
+                    }
+                    .pointerInput(t.id) {
+                        detectTapGestures(onLongPress = { onEdit() })
+                    }
+                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier.size(22.dp).clip(CircleShape).background(fill)
+                        .border(1.6.dp, if (checked) Done else if (late) ReminderAmber else Color.White.copy(alpha = 0.5f), CircleShape)
+                        .clickable(enabled = !checked) {
+                            onCheck()
+                            checked = true
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (checked) Icon(Icons.Rounded.Check, null, tint = Color(0xFF0B1F12), modifier = Modifier.size(14.dp))
+                }
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    t.title,
+                    color = Color.White.copy(alpha = if (checked) 0.55f else 1f), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                t.remindAt?.let {
+                    Text("⏰ ${time(it)}", color = if (late) ReminderAmber else Secondary, fontSize = 11.sp)
+                    Spacer(Modifier.width(4.dp))
+                }
             }
         }
     }

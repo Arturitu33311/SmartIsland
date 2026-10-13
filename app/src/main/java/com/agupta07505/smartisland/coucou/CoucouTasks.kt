@@ -102,6 +102,17 @@ object CoucouTasks {
         return list
     }
 
+    /** Rewords a task; a time in the sentence ("a las 18:00") moves its reminder. */
+    fun edit(context: Context, id: String, text: String): List<CoucouTask> {
+        val parsed = TaskParser.parseWhen(text, nowSec(), ::offset)
+        val list = TaskStore.of(context).update { TaskLogic.edit(it, id, parsed.title.ifEmpty { text }, parsed.whenSec, nowSec()) }
+        withdraw(context, id)
+        ReminderScheduler.rearm(context)
+        changed(context)
+        _state.value = list
+        return list
+    }
+
     fun snooze(context: Context, id: String, seconds: Long): List<CoucouTask> {
         val list = TaskStore.of(context).update { TaskLogic.snooze(it, id, nowSec() + seconds, nowSec()) }
         withdraw(context, id)

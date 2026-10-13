@@ -7,6 +7,7 @@
 
 package com.agupta07505.smartisland.coucou.ui
 
+import com.agupta07505.smartisland.R
 import kotlin.random.Random
 
 /** The small things he does on his own while calm. [None] is "between gestures". */
@@ -110,30 +111,43 @@ object MochiIdleScript {
         return pool[rnd.nextInt(pool.size)]
     }
 
-    /** What the expanded desk says under his name when there is no timed task to show. */
-    fun phrases(open: Int, overdue: Int, hour: Int): List<String> {
-        if (overdue > 0) return listOf("Ojo, algo se pasó de hora", "Un ratito y lo sacamos", "Yo te acompaño")
+    /** A line Mochi says: a string resource and, for the ones that count something, the number. */
+    data class Phrase(@androidx.annotation.StringRes val res: Int, val arg: Int? = null)
+
+    /** What the expanded desk says as its headline when there is no timed task to show. */
+    fun phrases(open: Int, overdue: Int, hour: Int): List<Phrase> {
+
+        if (overdue > 0) return listOf(Phrase(R.string.coucou_phrase_late_1), Phrase(R.string.coucou_phrase_late_2), Phrase(R.string.coucou_phrase_late_3))
         val base = if (open == 0) {
-            listOf("Todo despejado ✨", "Nada pendiente, qué paz", "Hoy vas bien", "Mochi está estirándose", "Pídeme algo, estoy libre")
+            listOf(
+                Phrase(R.string.coucou_phrase_clear_1), Phrase(R.string.coucou_phrase_clear_2), Phrase(R.string.coucou_phrase_clear_3),
+                Phrase(R.string.coucou_phrase_clear_4), Phrase(R.string.coucou_phrase_clear_5),
+            )
         } else {
-            listOf("Sin horas, a tu ritmo", "Una a la vez", "Tú puedes con $open", "Empieza por la más corta", "Aquí te espero")
+            listOf(
+                Phrase(R.string.coucou_phrase_busy_1), Phrase(R.string.coucou_phrase_busy_2), Phrase(R.string.coucou_phrase_busy_3, open),
+                Phrase(R.string.coucou_phrase_busy_4), Phrase(R.string.coucou_phrase_busy_5),
+            )
         }
         val extra = when (hour) {
-            in 5..11 -> listOf("Buenos días ☀️")
-            in 14..17 -> listOf("¿Un cafecito? ☕")
-            in 20..23 -> listOf("Ya casi a descansar 🌙")
+            in 5..11 -> listOf(Phrase(R.string.coucou_phrase_morning))
+            in 14..17 -> listOf(Phrase(R.string.coucou_phrase_afternoon))
+            in 20..23 -> listOf(Phrase(R.string.coucou_phrase_evening))
             else -> emptyList()
         }
         return extra + base
     }
 
-    /** The small grey line under the headline: how many things are open. */
-    fun deskStatus(open: Int, overdue: Int): String = when {
-        overdue > 0 -> "$overdue overdue"
-        open == 0 -> "All clear"
-        else -> "$open to do"
+    /** The small grey line under the headline says one of these: how many things are open. */
+    enum class StatusKind { Overdue, Clear, Todo }
+
+    fun statusKind(open: Int, overdue: Int): StatusKind = when {
+        overdue > 0 -> StatusKind.Overdue
+        open == 0 -> StatusKind.Clear
+        else -> StatusKind.Todo
     }
 
-    fun phraseAt(list: List<String>, step: Int): String =
-        if (list.isEmpty()) "" else list[Math.floorMod(step, list.size)]
+    /** The phrase for a step of the rotation; the step wraps. Null for an empty list. */
+    fun phraseAt(list: List<Phrase>, step: Int): Phrase? =
+        if (list.isEmpty()) null else list[Math.floorMod(step, list.size)]
 }

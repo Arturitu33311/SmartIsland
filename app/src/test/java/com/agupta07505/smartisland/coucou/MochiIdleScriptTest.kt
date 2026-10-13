@@ -3,6 +3,7 @@ package com.agupta07505.smartisland.coucou
 import com.agupta07505.smartisland.coucou.ui.IdleGesture
 import com.agupta07505.smartisland.coucou.ui.MochiIdleScript
 import com.agupta07505.smartisland.coucou.ui.MochiMood
+import com.agupta07505.smartisland.R
 import kotlin.random.Random
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -112,6 +113,7 @@ class MochiIdleScriptTest {
 
     @Test
     fun phrases_fit_the_situation_and_rotate() {
+
         val empty = MochiIdleScript.phrases(open = 0, overdue = 0, hour = 12)
         val busy = MochiIdleScript.phrases(open = 3, overdue = 0, hour = 12)
         val late = MochiIdleScript.phrases(open = 3, overdue = 1, hour = 12)
@@ -119,11 +121,13 @@ class MochiIdleScriptTest {
         assertTrue(busy.size >= 3)
         assertTrue(late.isNotEmpty())
         assertNotEquals(empty, busy)
-        assertTrue(MochiIdleScript.phrases(0, 0, hour = 8).any { it.contains("Buenos días") })
+        assertTrue(MochiIdleScript.phrases(0, 0, hour = 8).any { it.res == R.string.coucou_phrase_morning })
+        // The one that counts carries the number.
+        assertEquals(3, busy.first { it.res == R.string.coucou_phrase_busy_3 }.arg)
         // Step wraps instead of throwing.
         assertEquals(empty[0], MochiIdleScript.phraseAt(empty, empty.size))
         assertEquals(empty[1], MochiIdleScript.phraseAt(empty, 1))
-        assertEquals("", MochiIdleScript.phraseAt(emptyList(), 5))
+        assertEquals(null, MochiIdleScript.phraseAt(emptyList(), 5))
     }
 
     @Test
@@ -149,10 +153,10 @@ class MochiIdleScriptTest {
     }
 
     @Test
-    fun desk_status_counts_what_is_open() {
-        assertEquals("All clear", MochiIdleScript.deskStatus(0, 0))
-        assertEquals("3 to do", MochiIdleScript.deskStatus(3, 0))
-        assertEquals("2 overdue", MochiIdleScript.deskStatus(3, 2))
+    fun desk_status_says_overdue_first() {
+        assertEquals(MochiIdleScript.StatusKind.Clear, MochiIdleScript.statusKind(0, 0))
+        assertEquals(MochiIdleScript.StatusKind.Todo, MochiIdleScript.statusKind(3, 0))
+        assertEquals(MochiIdleScript.StatusKind.Overdue, MochiIdleScript.statusKind(3, 2))
     }
 
     @Test

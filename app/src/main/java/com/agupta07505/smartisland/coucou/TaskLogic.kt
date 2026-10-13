@@ -97,6 +97,19 @@ object TaskLogic {
     fun snooze(list: List<CoucouTask>, id: String, until: Long, now: Long = nowSec()) =
         change(list, id) { it.copy(remindAt = until, notified = false, done = false, completedAt = null, updatedAt = now) }
 
+    /**
+     * New wording, and a new reminder if the sentence carried a time (otherwise the old one stays). It is
+     * the same task for the other devices, stamped as a change so the newest one wins.
+     */
+    fun edit(list: List<CoucouTask>, id: String, title: String, remindAt: Long?, now: Long = nowSec()): List<CoucouTask> {
+        val t = title.trim().take(MAX_TITLE)
+        require(t.isNotEmpty()) { "A task needs a title" }
+        return change(list, id) {
+            val moved = remindAt != null && remindAt != it.remindAt
+            it.copy(title = t, remindAt = remindAt ?: it.remindAt, notified = if (moved) false else it.notified, updatedAt = now)
+        }
+    }
+
     fun markNotified(list: List<CoucouTask>, id: String) = change(list, id) { it.copy(notified = true) }
 
     fun setJinx(list: List<CoucouTask>, id: String, on: Boolean) = change(list, id) { it.copy(jinx = on) }

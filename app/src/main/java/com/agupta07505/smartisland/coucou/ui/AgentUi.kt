@@ -51,6 +51,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
+import com.agupta07505.smartisland.R
 import com.agupta07505.smartisland.coucou.CoucouRuntime
 import com.agupta07505.smartisland.coucou.IslandAgents
 import com.agupta07505.smartisland.coucou.agents.ActivityKind
@@ -68,6 +70,29 @@ val ClaudeOrange = Color(0xFFD97757)
 val QuestionBlue = Color(0xFF60A5FA)
 private val Green = Color(0xFF4ADE80)
 private val Red = Color(0xFFF4505E)
+
+/** "Editing Mochi.kt" in the person's language: the verb from resources, the subject as the laptop sent it. */
+fun activityLine(context: android.content.Context, a: com.agupta07505.smartisland.coucou.agents.Activity): String {
+    val res = when (a.verb) {
+        "Thinking" -> R.string.coucou_act_thinking
+        "Reading" -> R.string.coucou_act_reading
+        "Editing" -> R.string.coucou_act_editing
+        "Writing" -> R.string.coucou_act_writing
+        "Searching" -> R.string.coucou_act_searching
+        "Listing" -> R.string.coucou_act_listing
+        "Searching the web" -> R.string.coucou_act_web_search
+        "Fetching" -> R.string.coucou_act_fetching
+        "Running" -> R.string.coucou_act_running
+        "Delegating" -> R.string.coucou_act_delegating
+        "Planning" -> R.string.coucou_act_planning
+        "Using" -> R.string.coucou_act_using
+        "Needs you" -> R.string.coucou_act_needs_you
+        "Idle" -> R.string.coucou_act_idle
+        else -> null
+    }
+    val verb = res?.let { context.getString(it) } ?: a.verb
+    return if (a.subject.isEmpty()) verb else "$verb ${a.subject}"
+}
 
 /** What the island card says Claude Code is doing: the kind rides in the notification's category. */
 const val ACTIVITY_CATEGORY_PREFIX = "activity:"
@@ -165,6 +190,7 @@ private fun WorkingDots(color: Color) {
 @Composable
 fun AgentExpanded(bottomPadding: Dp) {
     val ui by CoucouRuntime.agentUi.collectAsState()
+    val context = LocalContext.current
     // One tick a second while the card is open, so the times move; closed, nothing runs.
     val now by produceState(System.currentTimeMillis()) {
         while (true) {
@@ -186,13 +212,13 @@ fun AgentExpanded(bottomPadding: Dp) {
             val working = shown.count { it.state == SessionState.Working }
             val asking = shown.count { it.state == SessionState.NeedsYou }
             val summary = listOfNotNull(
-                if (working > 0) "$working working" else null,
-                if (asking > 0) "$asking asking" else null,
+                if (working > 0) context.getString(R.string.coucou_agent_working, working) else null,
+                if (asking > 0) context.getString(R.string.coucou_agent_asking, asking) else null,
             ).joinToString(" · ")
-            if (summary.isNotEmpty()) Text(summary, color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
+            if (summary.isNotEmpty()) Text(summary, color = Color.White.copy(alpha = 0.62f), fontSize = 11.sp)
         }
         Spacer(Modifier.size(6.dp))
-        if (rows.isEmpty()) Text("Nothing running", color = Color.White.copy(alpha = 0.5f), fontSize = 13.sp)
+        if (rows.isEmpty()) Text(stringResource(R.string.coucou_agent_nothing), color = Color.White.copy(alpha = 0.62f), fontSize = 13.sp)
         for (s in rows) {
             val act = AgentActivity.of(s.tool, s.detail, s.state)
             val color = colorOf(act.kind)
@@ -202,28 +228,34 @@ fun AgentExpanded(bottomPadding: Dp) {
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            s.project.ifEmpty { "session" }, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                            s.project.ifEmpty { stringResource(R.string.coucou_agent_session) }, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium,
                             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
                         )
                         if (s.state != SessionState.Idle) {
                             Spacer(Modifier.width(8.dp))
                             val meta = buildString {
                                 append(AgentActivity.elapsed(now - s.since))
-                                if (s.state == SessionState.Working && s.steps > 0) append(" · ${s.steps} step${if (s.steps == 1) "" else "s"}")
+                                if (s.state == SessionState.Working && s.steps > 0) {
+                                    append(" · ")
+                                    append(context.resources.getQuantityString(R.plurals.coucou_agent_steps, s.steps, s.steps))
+                                }
                             }
-                            Text(meta, color = Color.White.copy(alpha = 0.4f), fontSize = 11.sp, maxLines = 1)
+                            Text(meta, color = Color.White.copy(alpha = 0.62f), fontSize = 11.sp, maxLines = 1)
                         }
                     }
                     Text(
-                        act.line,
-                        color = if (s.state == SessionState.Idle) Color.White.copy(alpha = 0.4f) else color,
+                        activityLine(context, act),
+                        color = if (s.state == SessionState.Idle) Color.White.copy(alpha = 0.62f) else color,
                         fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
         }
         if (shown.size > rows.size) {
-            Text("+${shown.size - rows.size} more", color = Color.White.copy(alpha = 0.4f), fontSize = 11.sp, modifier = Modifier.padding(start = 15.dp, top = 2.dp))
+            Text(
+                stringResource(R.string.coucou_agent_more, shown.size - rows.size),
+                color = Color.White.copy(alpha = 0.62f), fontSize = 11.sp, modifier = Modifier.padding(start = 15.dp, top = 2.dp),
+            )
         }
     }
 }
