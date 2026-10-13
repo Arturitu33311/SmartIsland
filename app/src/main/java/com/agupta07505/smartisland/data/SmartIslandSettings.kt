@@ -77,7 +77,9 @@ data class SmartIslandSettings(
     val pillSwipeDownAction: String = "Expand",
     val pillSwipeLeftAction: String = "PreviousNotification",
     val pillSwipeRightAction: String = "NextNotification",
-    val circlePosition: String = CIRCLE_POSITION_RIGHT
+    val circlePosition: String = CIRCLE_POSITION_RIGHT,
+    // Hairline + lifted fill so a dark island keeps an edge on a dark screen (see util/EdgeContrast).
+    val edgeContrast: String = EDGE_CONTRAST_AUTO
 ) {
     fun toJson(appVersion: String = ""): String {
         val root = JSONObject()
@@ -140,6 +142,7 @@ data class SmartIslandSettings(
         settingsObj.put("autoExpandOnNotification", autoExpandOnNotification)
         settingsObj.put("enableShadow", enableShadow)
         settingsObj.put("shadowElevation", shadowElevation.toDouble())
+        settingsObj.put("edgeContrast", edgeContrast)
         settingsObj.put("enableMusicArtworkBackground", enableMusicArtworkBackground)
         settingsObj.put("enableNotificationBackdrop", enableNotificationBackdrop)
         settingsObj.put("deviceType", deviceType)
@@ -186,6 +189,11 @@ data class SmartIslandSettings(
     companion object {
         const val CIRCLE_POSITION_RIGHT = "right"
         const val CIRCLE_POSITION_LEFT = "left"
+
+        const val EDGE_CONTRAST_AUTO = "auto"
+        const val EDGE_CONTRAST_ALWAYS = "always"
+        const val EDGE_CONTRAST_NEVER = "never"
+        val VALID_EDGE_CONTRAST = setOf(EDGE_CONTRAST_AUTO, EDGE_CONTRAST_ALWAYS, EDGE_CONTRAST_NEVER)
 
         val Default = SmartIslandSettings()
 
@@ -295,6 +303,9 @@ data class SmartIslandSettings(
                 autoExpandOnNotification = obj.optBoolean("autoExpandOnNotification", defaults.autoExpandOnNotification),
                 enableShadow = obj.optBoolean("enableShadow", defaults.enableShadow),
                 shadowElevation = safeFloat("shadowElevation", defaults.shadowElevation, MIN_SHADOW_ELEVATION, MAX_SHADOW_ELEVATION),
+                edgeContrast = obj.optString("edgeContrast", defaults.edgeContrast).let {
+                    if (it in VALID_EDGE_CONTRAST) it else defaults.edgeContrast
+                },
                 enableMusicArtworkBackground = obj.optBoolean("enableMusicArtworkBackground", defaults.enableMusicArtworkBackground),
                 enableNotificationBackdrop = obj.optBoolean("enableNotificationBackdrop", defaults.enableNotificationBackdrop),
                 deviceType = obj.optString("deviceType", defaults.deviceType),

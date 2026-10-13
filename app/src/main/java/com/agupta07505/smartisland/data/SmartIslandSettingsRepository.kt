@@ -76,6 +76,7 @@ class SmartIslandSettingsRepository(private val context: Context) {
         val ShowInLandscape = booleanPreferencesKey("show_in_landscape")
         val AutoExpandOnNotification = booleanPreferencesKey("auto_expand_on_notification")
         val EnableShadow = booleanPreferencesKey("enable_shadow")
+        val EdgeContrast = stringPreferencesKey("edge_contrast")
         val ShadowElevation = floatPreferencesKey("shadow_elevation")
         val EnableMusicArtworkBackground = booleanPreferencesKey("enable_music_artwork_background")
         val EnableNotificationBackdrop = booleanPreferencesKey("enable_notification_backdrop")
@@ -212,6 +213,8 @@ class SmartIslandSettingsRepository(private val context: Context) {
                 showInLandscape = prefs[Keys.ShowInLandscape] ?: defaults.showInLandscape,
                 autoExpandOnNotification = prefs[Keys.AutoExpandOnNotification] ?: defaults.autoExpandOnNotification,
                 enableShadow = prefs[Keys.EnableShadow] ?: defaults.enableShadow,
+                edgeContrast = prefs[Keys.EdgeContrast]
+                    ?.takeIf { it in SmartIslandSettings.VALID_EDGE_CONTRAST } ?: defaults.edgeContrast,
                 shadowElevation = validDimension(
                     prefs[Keys.ShadowElevation],
                     defaults.shadowElevation,
@@ -251,6 +254,10 @@ class SmartIslandSettingsRepository(private val context: Context) {
     suspend fun setDeviceType(value: String) = editSafely { it[Keys.DeviceType] = value }
     suspend fun setEnabled(value: Boolean) = editSafely { it[Keys.Enabled] = value }
     suspend fun setEnableShadow(value: Boolean) = editSafely { it[Keys.EnableShadow] = value }
+    suspend fun setEdgeContrast(value: String) = editSafely {
+        it[Keys.EdgeContrast] =
+            if (value in SmartIslandSettings.VALID_EDGE_CONTRAST) value else SmartIslandSettings.EDGE_CONTRAST_AUTO
+    }
     suspend fun setShadowElevation(value: Float) = editSafely {
         it[Keys.ShadowElevation] = validDimension(
             value,
@@ -614,6 +621,9 @@ class SmartIslandSettingsRepository(private val context: Context) {
         prefs[Keys.ShowInLandscape] = settings.showInLandscape
         prefs[Keys.AutoExpandOnNotification] = settings.autoExpandOnNotification
         prefs[Keys.EnableShadow] = settings.enableShadow
+        prefs[Keys.EdgeContrast] =
+            if (settings.edgeContrast in SmartIslandSettings.VALID_EDGE_CONTRAST) settings.edgeContrast
+            else SmartIslandSettings.EDGE_CONTRAST_AUTO
         prefs[Keys.ShadowElevation] = validDimension(
             settings.shadowElevation,
             SmartIslandSettings.Default.shadowElevation,

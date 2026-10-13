@@ -175,6 +175,11 @@
     <string name="slider_vertical_offset">Vertical (Y) Offset</string>
     <string name="slider_corner_radius">Corner Radius</string>
     <string name="slider_island_opacity">Island Opacity &amp; Transparency</string>
+    <string name="edge_contrast_title">Edge contrast</string>
+    <string name="edge_contrast_desc">A hairline, a lighter fill and a soft sheen so a dark island does not vanish on a dark screen</string>
+    <string name="edge_contrast_auto">Auto</string>
+    <string name="edge_contrast_always">On</string>
+    <string name="edge_contrast_never">Off</string>
     <string name="toggle_drop_shadow_title">Island Drop Shadow</string>
     <string name="toggle_drop_shadow_desc">Add a soft ambient drop shadow for a floating depth effect</string>
     <string name="slider_shadow_elevation">Shadow Elevation</string>

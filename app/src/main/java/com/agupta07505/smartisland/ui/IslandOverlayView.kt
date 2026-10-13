@@ -66,6 +66,8 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
+import com.agupta07505.smartisland.util.edgeContrast
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -281,7 +283,12 @@ fun IslandOverlayView(
     }
 
     val isHiding = isIdleHiding || (settings.autoHidePill && isAutoHidden)
-    val pillBackgroundColor = Color(settings.pillColor)
+    // Dark island on a dark screen: lifted fill, hairline and sheen (EdgeContrast), so its edge shows.
+    val systemDark = (configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+    val pillBase = Color(settings.pillColor)
+    val pillLuminance = pillBase.luminance()
+    val edgeContrastOn = com.agupta07505.smartisland.util.EdgeContrast.shouldApply(settings.edgeContrast, systemDark, pillLuminance)
+    val pillBackgroundColor = com.agupta07505.smartisland.util.EdgeContrast.fill(pillBase, edgeContrastOn, pillLuminance)
     // A light wash of the album cover over the main pill while music plays (the bars already wear
     // it full-strength): 35% toward the cover, gliding back to the setting when music stops or
     // the cover has no colour. The secondary bubble stays neutral so Mochi always pops.
@@ -555,6 +562,7 @@ fun IslandOverlayView(
                 )
                 .clip(mainShape)
                 .background(pillTint.copy(alpha = settings.opacity))
+                .edgeContrast(edgeContrastOn, mainShape)
                 .then(auraModifier)
                 .pointerInput(displayMetrics.density, isInputActive) {
                     if (isInputActive) return@pointerInput
@@ -1010,6 +1018,7 @@ fun IslandOverlayView(
                     )
                     .clip(RoundedCornerShape(secondaryBubbleCorner))
                     .background(pillBackgroundColor.copy(alpha = settings.opacity))
+                    .edgeContrast(edgeContrastOn, RoundedCornerShape(secondaryBubbleCorner))
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
@@ -1073,6 +1082,7 @@ fun IslandOverlayView(
                     )
                     .clip(RoundedCornerShape(settings.cornerRadius.dp))
                     .background(pillBackgroundColor.copy(alpha = settings.opacity))
+                    .edgeContrast(edgeContrastOn, RoundedCornerShape(settings.cornerRadius.dp))
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
