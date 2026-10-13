@@ -32,14 +32,17 @@ object DeskState {
     const val CLEAR = "clear"
 }
 
-/** Left of the collapsed island: Mochi, napping when there is nothing to do, looking up when something is overdue. */
+/**
+ * Left of the collapsed island, when his desk is the only thing on it and so he lives in the main
+ * pill instead of the bubble. He is the same Mochi as the bubble's: same moods (news, music, Claude
+ * working, overdue, night), same outfits, same little gestures. [notification] only carries the count
+ * on the right; what he feels is read from the tasks and the room, exactly like the bubble.
+ */
 @Composable
+@Suppress("UNUSED_PARAMETER")
 fun DeskCollapsedGlyph(notification: IslandNotification?) {
-    when (notification?.category) {
-        DeskState.OVERDUE -> MochiGlyph(24.dp, ReminderAmber, MochiMood.Alert)
-        // Awake and doing his little things; he only dozes at night or after 20 quiet minutes.
-        else -> LivelyMochi(24.dp, MochiEmerald, rememberCalmMood(emptyList()))
-    }
+    val b = bubbleMood(lookDir = 0f)
+    LivelyMochi(24.dp, b.tint, b.mood, outfit = rememberMochiOutfit(b.mood))
 }
 
 /** Right of the collapsed island: how many things are open. */
