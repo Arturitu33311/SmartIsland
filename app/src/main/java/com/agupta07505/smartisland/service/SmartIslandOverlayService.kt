@@ -758,7 +758,7 @@ class SmartIslandOverlayService : AccessibilityService() {
             return
         }
         if (resizes && view.isAttachedToWindow && view.visibility == android.view.View.VISIBLE) {
-            applyWindowResizeMasked(view, params, growing = expanded)
+            applyWindowResizeMasked(view, params, previous = lp, growing = expanded)
             return
         }
         runCatchingLogged(TAG, "Failed to update view layout") {
@@ -766,13 +766,30 @@ class SmartIslandOverlayService : AccessibilityService() {
         }
     }
 
-    private fun applyWindowResizeMasked(view: android.view.View, params: WindowManager.LayoutParams, growing: Boolean) {
+    /**
+     * Resizes the overlay window without showing the stale frames the system keeps for a moment
+     * (see [windowReady]). A still picture of the pill is put in a second, touch-less window right
+     * over it, the real view is hidden, resized and shown again, and only then is the picture taken
+     * away: what the person sees never changes, so there is nothing to blink. If the picture cannot
+     * be taken the view is just hidden across the resize.
+     */
+    private fun applyWindowResizeMasked(
+        view: android.view.View,
+        params: WindowManager.LayoutParams,
+        previous: WindowManager.LayoutParams?,
+        growing: Boolean,
+    ) {
         pendingParams = params
         if (growing) windowReady.value = false
-        view.alpha = 0f
+        // The pill-sized window is the one worth a picture: the old one when growing, the new one when shrinking.
+        val small = if (growing) previous else params
+        val ghost = small?.let { addGhostWindow(view, it) }
         maskJob = serviceScope.launch {
             try {
-                // Two frames drawn transparent, so nothing visible is left to be shown out of place...
+                // One frame so the picture is on screen before the real view goes away.
+                if (ghost != null) kotlinx.coroutines.delay(WINDOW_GHOST_SETTLE_MS)
+                view.alpha = 0f
+                // Two frames drawn transparent, so nothing out of place is left to be shown...
                 kotlinx.coroutines.delay(WINDOW_MASK_BEFORE_MS)
                 pendingParams?.let { p ->
                     runCatchingLogged(TAG, "Failed to update view layout") { windowManager.updateViewLayout(view, p) }
@@ -783,7 +800,57 @@ class SmartIslandOverlayService : AccessibilityService() {
                 view.alpha = 1f
                 windowReady.value = true
                 pendingParams = null
+                if (ghost != null) {
+                    // He is back under the picture; let one frame show him there, then drop it.
+                    view.postOnAnimationDelayed({ removeGhostWindow(ghost) }, WINDOW_GHOST_SETTLE_MS)
+                }
             }
+        }
+    }
+
+    private fun addGhostWindow(view: android.view.View, small: WindowManager.LayoutParams): android.view.View? {
+        return runCatchingLogged(TAG, "Failed to add the resize picture") {
+            val w = if (small.width > 0) small.width else view.width
+            val h = if (small.height > 0) small.height else view.height
+            if (w <= 0 || h <= 0 || view.width <= 0 || view.height <= 0) return@runCatchingLogged null
+            // Where the pill-sized window sits inside the view being drawn (the view is as wide as the
+            // window it lives in: the pill-sized one itself, or the full-screen one).
+            val left = if (view.width == w) 0 else ((view.width - w) / 2f + small.x).toInt()
+            val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+            val canvas = android.graphics.Canvas(bmp)
+            canvas.translate(-left.toFloat(), 0f)
+            view.draw(canvas)
+            val image = android.widget.ImageView(this).apply {
+                setImageBitmap(bmp)
+                scaleType = android.widget.ImageView.ScaleType.FIT_XY
+                importantForAccessibility = android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }
+            val lp = WindowManager.LayoutParams(
+                w,
+                h,
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                x = small.x
+                y = small.y
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                }
+            }
+            windowManager.addView(image, lp)
+            image as android.view.View
+        }
+    }
+
+    private fun removeGhostWindow(ghost: android.view.View) {
+        runCatchingLogged(TAG, "Failed to remove the resize picture") {
+            if (ghost.isAttachedToWindow) windowManager.removeViewImmediate(ghost)
         }
     }
 
@@ -1064,5 +1131,6 @@ class SmartIslandOverlayService : AccessibilityService() {
         private const val COLLAPSE_WINDOW_DELAY_MS = 650L
         private const val WINDOW_MASK_BEFORE_MS = 34L
         private const val WINDOW_MASK_AFTER_MS = 34L
+        private const val WINDOW_GHOST_SETTLE_MS = 20L
     }
 }
