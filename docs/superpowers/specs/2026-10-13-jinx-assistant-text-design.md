@@ -20,6 +20,10 @@ other apps. They come in later phases and must not need a redesign of this one.
    is down since 2026-10-09. The gateway answers with the fallback Jinx (JINX-CORE +
    synced memory, OpenRouter → local Ollama). It moves to / forwards to Hermes when the
    server is back (see "Open questions").
+3. **Each phone is independent (2026-10-13).** The assistant must work on the S21 and
+   S22 with no laptop, no other phone and no internet, using an on-device model when
+   offline. The laptop gateway is an optional upgrade, never a requirement. See
+   "Independent mode".
 
 ## What exists today (verified)
 
@@ -117,60 +121,103 @@ Coucou is not running: `items: []` and the panel says so; it is not an error.
 - When the island is visible, the answer is also posted as a Jinx message
   (`mochi:<Mood>:info`) so Mochi shows it; the mood comes from the same mapper the
   island already uses.
-- Offline / laptop unreachable: the panel shows the cached last thread (kept in
-  app-private storage) and queues the text in an outbox that is sent on reconnect,
-  with a visible "pendiente de enviar" state. It never fakes an answer.
+- Laptop unreachable: the app's own `ChatEngine` answers (see "Independent mode"). Only
+  if that engine cannot answer either (no internet and no downloaded local model) the
+  text waits in the outbox with a visible "pendiente" state. It never fakes an answer.
 
-## Fallback chain: the phones as gateways (requested 2026-10-13)
+## Independent mode: each phone has its own Jinx (requested 2026-10-13)
 
-The same `jinx-chat` protocol must keep working when the laptop is off, because the
-Telegram relay already falls back laptop > s21 > s22 and the assistant should not be
-weaker than that. `jinx-chat`, `jinx_thread.py` and `jinx` are plain Python, so they run
-unchanged in Termux on each phone (it is where `jinx-telegram` already runs).
+Requirement: on the S21 and S22 the assistant works **by itself**, with no laptop, no
+other phone, and no internet. This replaces the earlier idea of using the phones' Termux
+as gateways: Termux does not start after a reboot, depends on battery settings and on
+sshd, and an in-app engine strictly dominates it.
 
-`JinxChatClient` tries targets in this order and **remembers the last one that worked**
-(tried first next time; each probe uses a 3 s connect, not `Ssh`'s 8 s):
+### The phone is a complete stack
 
-| # | Target | How | Needs |
-|---|---|---|---|
-| 1 | Laptop | `Ssh` profile `LAPTOP`, command `jinx-chat` via `coucou-dispatch` | laptop on, Tailscale |
-| 2 | **This phone's own Termux** | `127.0.0.1:8022`, same key, same command | Termux sshd up; works with **no Tailscale and no laptop** |
-| 3 | The other phone's Termux | `100.x:8022` from `phones.conf` | that phone on, Tailscale |
-| 4 | Offline | cached thread + outbox, nothing invented | — |
+```
+JinxAssistActivity ─▶ ChatEngine (in the app, always available)
+                        ├─ ThreadStore   app-private file, same {ts,src,text,cid,mirrored} lines
+                        ├─ Persona       JINX-CORE.md + MEMORY.md, cached copy (see below)
+                        ├─ Brain         1) OpenRouter direct, if there is internet
+                        │                2) on-device model (LiteRT-LM), if not / if it fails
+                        └─ Mirror        Telegram sendMessage, queued until there is internet
+              ▲ optional, when reachable in 3 s:
+              └─ Laptop gateway (`jinx-chat`): richer brain (tools, Claude Code sessions,
+                 pendientes) and the canonical thread. Never required.
+```
 
-Rules that keep the chain honest:
+**Selection per message:** laptop gateway if it answers the 3 s probe → else the
+in-app engine. The panel's badge says which one answered ("laptop", "este teléfono ·
+nube", "este teléfono · sin conexión"). The last one that worked is tried first.
 
-- **One forced command per phone key in Termux too**: `command="…/jinx-chat-dispatch"`
-  restricted the same way as on the laptop (`coucou` is not offered there; only
-  `jinx-chat`). `jinx-phone-onboard` gets a `chat-key` subcommand for it (it already
-  handles `coucou-key|laptop-key|relay|status`).
-- **The thread is the single source of truth.** `history-*.json` (the model's
-  20-message context) is *derived* from the tail of `thread.jsonl`, never merged on its
-  own. So the only thing to reconcile between devices is `thread.jsonl`.
-- **Reconciliation**: `jinx-sync-celular` (every 10 min, already multi-phone) pushes the
-  laptop's `thread.jsonl` and pulls each phone's, then merges by `(ts, cid)` with dedupe
-  and rewrites each device's copy. A message answered by a phone while the laptop was off
-  reaches the laptop thread, so the next answer anywhere sees it. If a sync has not run,
-  a device answers from what it has; it never blocks on another.
-- **Mirror from a phone**: allowed only while that phone holds the Telegram turn or the
-  relay is idle by the existing priority/heartbeat rules (so Hermes is never doubled);
-  otherwise the line stays `mirrored:false` in `thread.jsonl` and is sent by whoever
-  syncs it next. Phones already hold the bot token in `~/.jinx-secrets`.
-- **Brain on a phone**: same fallback as the relay there — OpenRouter with
-  `JINX_OR_KEY`, else local `gemma4:e2b` is *not* available (no Ollama in Termux), so
-  with no internet a phone answers `error: sin modelo disponible` and the panel says so.
-  A local model on the phone is out of scope here.
+### On-device model
 
-**Not working today (checked 2026-10-13):** laptop relay heartbeat `:18790` is up;
-Termux sshd `:8022` refuses on the S21 and the S22, and the S21's relay heartbeat is
-down. Also, the relay on a phone does not start itself after a reboot (Play-store
-Termux has no Termux:Boot), and Termux needs "Unrestricted" battery. So phases 1a/1b:
+- **Runtime: LiteRT-LM (Kotlin API).** Google's MediaPipe LLM Inference API is in
+  maintenance-only mode and points to LiteRT-LM for Android. Alternative kept in
+  reserve: llama.cpp via a JNI binding (GGUF, CPU), if LiteRT-LM misbehaves on these
+  devices.
+- **Model: a Gemma 2B-class `.litertlm`** (Gemma-4-E2B is listed at about 2.6 GB;
+  Gemma-3 1B is the smaller option). Same family as `gemma4:e2b`, which already
+  answers Jinx well on the laptop. Final pick is made by the spike below, not now.
+- **Reference numbers** (from Google's page, Samsung S24 Ultra, Gemma-3n-E2B, CPU):
+  prefill ~111 tok/s, decode ~16 tok/s. The S21/S22 are older, so **expect slower;
+  nothing is promised until measured on these two phones**.
+- **Delivery**: the model file is not in the APK (≈2.6 GB). The app downloads it on
+  Wi-Fi from a source Alan chooses (Hugging Face or the laptop over Tailscale), checks a
+  SHA-256 pinned in the app, and stores it in app-private storage. Until it is there the
+  panel says "modelo local no descargado" and offline answers are impossible, not faked.
+  Updating the APK with `install -r` does not delete it.
+- **Prompt budget**: JINX-CORE.md is 2.2 KB and MEMORY.md 3.5 KB (~1.7k tokens);
+  fits a 2B model's context with room for the 20-message thread. The app keeps
+  generation short (a max-token cap) because decode speed is the bottleneck.
+- **Memory/battery**: the engine is created on first use and released after a few
+  minutes idle; one generation at a time; cancelled when the panel closes. No
+  background service, no hotword in phase 1.
 
-- **1a** laptop gateway + the app (fully works with the laptop on).
-- **1b** phone targets (#2, #3): needs Alan to start Termux sshd on each phone once
-  and run `jinx-phone-onboard chat-key`; the app shows which targets answered
-  ("laptop", "este teléfono", "otro teléfono") in the "respaldo" badge so a silent
-  dead fallback is visible rather than discovered during an outage.
+### Persona and thread without the laptop
+
+- `JINX-CORE.md` and `MEMORY.md` come from the laptop gateway (new ops `core`, whitelisted
+  content only, never `USER.md`) and are **cached in app-private storage**. A minimal
+  built-in persona (the SOUL-emergencia text, 1.2 KB, no personal data) is bundled so a
+  phone that has never met the laptop still answers as Jinx, only knowing less.
+- The thread is local. When the laptop is reachable the app sends its unsent lines
+  (`op:"merge"`, deduped by `(ts,cid)`) and receives the ones it lacks. Two phones that
+  never see each other still each keep a coherent thread; they converge through the
+  laptop (or later the server). `history` for the model is always the tail of the local
+  thread, so there is nothing else to reconcile.
+
+### Secrets on the phone
+
+- The OpenRouter key and the Telegram token (+ allowed chat id) are needed for the
+  independent mode. They are provisioned **once** from the laptop gateway (op
+  `provision`, only over the already-pinned, key-authenticated ssh) and stored in the
+  Android Keystore-wrapped preferences, never in the APK or in logs.
+- Decision for Alan to confirm in review: these phones already hold both secrets in
+  Termux `~/.jinx-secrets`, so this adds no new class of exposure, but it does put them
+  in the Coucou app too. If he prefers, independent mode can ship **without** the
+  Telegram mirror and cloud brain (local model only) and add them later.
+- Mirror from a phone follows the existing rule: only when the relay's priority allows
+  it (heartbeats); otherwise lines stay `mirrored:false` and go out later, by this phone
+  or by the laptop after `merge`.
+
+### Spike first (before building the engine)
+
+Measure, on the real S21 and S22 via `adb install` of a tiny test activity (no taps on
+the phones): load time, prefill and decode tok/s, peak RAM, and temperature after 5
+turns, for Gemma-4-E2B and Gemma-3 1B on CPU and GPU. Pass criteria for phase 1b:
+first token under ~8 s warm, ≥ 5 tok/s decode, no OOM with Coucou's island running.
+If a phone fails, the plan switches that phone to the smaller model or to "cloud only,
+queue offline" and says so in the badge; it never pretends.
+
+### Phases
+
+- **1a** laptop gateway + app panel + `ChatApi`/laptop target (needs the laptop).
+- **1b** independent mode: `ThreadStore`, `Persona` cache, cloud brain, mirror queue,
+  `merge`/`core`/`provision` ops. Works with internet and no laptop.
+- **1c** on-device model (after the spike): offline answers.
+
+Termux relays keep doing what they did (Telegram fallback relay); the app does not
+depend on them.
 
 ## Error handling
 
@@ -211,7 +258,7 @@ Side key long-press defaults to Bixby. Alan sets *Side key → Press and hold �
 assistant* (wording varies by One UI version) and *Default apps → Digital assistant
 app → Coucou/Jinx*. Phase 1 ships a short `docs/ASSISTANT.md` with these steps.
 
-## Open questions (do not block phase 1)
+## Open questions (do not block phase 1a)
 
 1. **Hermes' API.** The server is down, so how to inject a message into Hermes' own
    Telegram session is unverified (a `:8642` HTTP server was noted in memory, never
@@ -220,10 +267,16 @@ app → Coucou/Jinx*. Phase 1 ships a short `docs/ASSISTANT.md` with these steps
 2. **Where the gateway ends up**: laptop (temporary) vs `server`. Decided later; the
    protocol is the same.
 3. **S22 key**: the S22's Coucou key is not authorized yet (see ADD-A-PHONE.md);
-   `jinx-phone-onboard` handles it. Needed for target #1 from the S22; targets #2/#3
-   additionally need Termux sshd (see "Fallback chain").
-4. **Model on the phone with no internet**: not solved (no Ollama in Termux). Options
-   for later: llama.cpp in Termux, or an in-app model. Not in phase 1.
+   `jinx-phone-onboard` handles it. Needed for the laptop target and for the one-time
+   provisioning (`core`, `provision`) from the S22; independent mode runs without it
+   once provisioned.
+4. **On-device model choice and speed**: decided by the spike in "Independent mode"
+   (Gemma-4-E2B vs Gemma-3 1B, CPU vs GPU, on the real S21 and S22). Nothing about
+   speed is promised before that.
+5. **Secrets in the app** (OpenRouter key, Telegram token): Alan confirms in review, or
+   ships independent mode as local-model-only first (see "Secrets on the phone").
+6. **Model download source**: Hugging Face on Wi-Fi vs the laptop over Tailscale; and
+   the pinned SHA-256 is filled in at spike time.
 
 ## Phases after this one (not designed here)
 
