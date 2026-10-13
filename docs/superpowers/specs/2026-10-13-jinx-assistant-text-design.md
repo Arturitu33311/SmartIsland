@@ -278,6 +278,16 @@ app → Coucou/Jinx*. Phase 1 ships a short `docs/ASSISTANT.md` with these steps
 6. **Model download source**: Hugging Face on Wi-Fi vs the laptop over Tailscale; and
    the pinned SHA-256 is filled in at spike time.
 
+## Implementation notes (2026-10-13, supersede the text above where they differ)
+
+1. **No `sessions` op** in `jinx-chat`: Claude Code sessions already reach the phone through the `coucou`
+   stream (`AgentRemote`); the panel reads `CoucouRuntime.agentUi`.
+2. **No `delta` events in phase 1**: `send` emits `ack` then `done`; streaming arrives with voice in phase 2.
+3. **Phone mirroring is unconditional**: `sendMessage` never competes with the relay's `getUpdates`, so the
+   heartbeat/priority rule applies only to polling, not to mirroring.
+4. **`coucou-dispatch` treats unknown commands as today's behaviour** (`coucou-hook --remote`), and only the
+   exact string `jinx-chat` selects the gateway, so no existing client changes.
+
 ## Phases after this one (not designed here)
 
 2 voice (STT/TTS, streaming answers) · 3 screen context (`AssistStructure`,
