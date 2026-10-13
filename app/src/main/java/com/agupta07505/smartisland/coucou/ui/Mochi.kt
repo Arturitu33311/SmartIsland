@@ -106,10 +106,25 @@ fun MochiGlyph(
     LaunchedEffect(outfit) { if (outfit != Outfit.None) enter.animateTo(1f, tween(350)) }
     val simplifiedOutfit = size < 40.dp
     val rawFit = if (outfit == Outfit.None) 1f else Wardrobe.fit(outfit)
-    // At island size the full shrink leaves a speck under the hat: shrink half as much and let him
-    // sit a little lower, so the hat still ends inside the pill.
-    val fit = if (simplifiedOutfit) 1f - (1f - rawFit) * 0.5f else rawFit
-    val drop = if (simplifiedOutfit) (1f - fit) * 0.14f else 0f
+    // At island size the pill and the bubble clip whatever falls outside the box he is drawn in, so
+    // everything that floats above his head (a thought bubble, "!", notes, "z") has to fit inside it
+    // too. How much room that needs, above the top of his body, in box heights:
+    val roomNeeded = if (!simplifiedOutfit) 0f else when {
+        mood == MochiMood.Idle && gesture == IdleGesture.Think -> 0.34f
+        mood == MochiMood.Surprised -> 0.21f
+        mood == MochiMood.Dancing -> 0.22f
+        mood == MochiMood.Sleepy -> 0.22f
+        else -> 0f
+    }.let { if (it > 0f) it + 0.06f else 0f }
+    // His body spans 0.78 of the box; shrink the whole picture just enough to fit it plus that room
+    // (never more than his outfit already needs), and slide it down so its top touches the box.
+    val targetFit = if (roomNeeded > 0f) minOf(rawFit, 1f / (0.78f + roomNeeded)) else rawFit
+    val fit by animateFloatAsState(targetFit, tween(220), label = "fit")
+    val drop by animateFloatAsState(
+        if (roomNeeded > 0f) (-0.5f + targetFit * (0.39f + roomNeeded)).coerceAtLeast(0f) else 0f,
+        tween(220), label = "drop",
+    )
+    val small = simplifiedOutfit
     val transition = rememberInfiniteTransition(label = "mochi")
     // Eyes open for ~3.6 s, shut for a blink of 0.15 s.
     val blink by transition.animateFloat(
@@ -359,20 +374,32 @@ fun MochiGlyph(
         if (g == IdleGesture.Whistle) {
             val r = w * 0.035f
             drawCircle(Color(0xFF1B1B20), radius = r, center = Offset(w / 2f, eyeY + bodyH * 0.27f))
-            glyph(textMeasurer, "♪", w * 0.80f, top - h * (0.02f + gp * 0.22f), w * 0.30f, Color.White, (1f - gp).coerceIn(0f, 1f))
+            if (small) {
+                glyph(textMeasurer, "♪", w * 0.80f, top - h * (0.0f + gp * 0.10f), w * 0.24f, Color.White, (1f - gp).coerceIn(0f, 1f))
+            } else {
+                glyph(textMeasurer, "♪", w * 0.80f, top - h * (0.02f + gp * 0.22f), w * 0.30f, Color.White, (1f - gp).coerceIn(0f, 1f))
+            }
         }
         if (g == IdleGesture.Think) {
             // A thought bubble: two little puffs and a cloud with something on his mind.
             val a = (env * 3f).coerceIn(0f, 1f)
             val cloud = Color.White.copy(alpha = 0.92f * a)
-            drawCircle(cloud, radius = w * 0.035f, center = Offset(w * 0.70f, top + bodyH * 0.02f))
-            drawCircle(cloud, radius = w * 0.055f, center = Offset(w * 0.80f, top - h * 0.07f))
-            drawCircle(cloud, radius = w * 0.24f, center = Offset(w * 0.78f, top - h * 0.24f))
-            glyph(textMeasurer, thought, w * 0.78f, top - h * 0.24f, w * 0.30f, Color.White, a)
+            if (small) {
+                // Island size: the cloud sits in the upper right of the box, inside what the pill shows.
+                drawCircle(cloud, radius = w * 0.03f, center = Offset(w * 0.58f, top + bodyH * 0.04f))
+                drawCircle(cloud, radius = w * 0.045f, center = Offset(w * 0.66f, top - h * 0.04f))
+                drawCircle(cloud, radius = w * 0.20f, center = Offset(w * 0.74f, top - h * 0.14f))
+                glyph(textMeasurer, thought, w * 0.74f, top - h * 0.14f, w * 0.26f, Color.White, a)
+            } else {
+                drawCircle(cloud, radius = w * 0.035f, center = Offset(w * 0.70f, top + bodyH * 0.02f))
+                drawCircle(cloud, radius = w * 0.055f, center = Offset(w * 0.80f, top - h * 0.07f))
+                drawCircle(cloud, radius = w * 0.24f, center = Offset(w * 0.78f, top - h * 0.24f))
+                glyph(textMeasurer, thought, w * 0.78f, top - h * 0.24f, w * 0.30f, Color.White, a)
+            }
         }
         if (charging && mood == MochiMood.Idle) {
             // Plugged in: a bolt that breathes with him.
-            glyph(textMeasurer, "⚡", w * 0.88f, top - h * 0.02f, w * 0.28f, Color(0xFFFACC15), 0.6f + 0.4f * bob)
+            glyph(textMeasurer, "⚡", w * 0.88f, top + h * (if (small) 0.03f else -0.02f), w * (if (small) 0.24f else 0.28f), Color(0xFFFACC15), 0.6f + 0.4f * bob)
         }
         if (mood == MochiMood.Error) {
             // A red dot over his head, like the laptop's error badge.
@@ -397,18 +424,31 @@ fun MochiGlyph(
         }
         if (surprised && pop > 0.4f) {
             // "!" over his head, fading in with the pop.
-            glyph(textMeasurer, "!", w * 0.5f, top - h * 0.10f, w * 0.34f, Color.White, pop.coerceIn(0f, 1f))
+            if (small) {
+                glyph(textMeasurer, "!", w * 0.5f, top - h * 0.04f, w * 0.28f, Color.White, pop.coerceIn(0f, 1f))
+            } else {
+                glyph(textMeasurer, "!", w * 0.5f, top - h * 0.10f, w * 0.34f, Color.White, pop.coerceIn(0f, 1f))
+            }
         }
         if (dancing) {
             // Two notes taking turns in the air.
             val up = (sin(wave) + 1f) / 2f
-            glyph(textMeasurer, "♪", w * 0.06f, top - h * (0.02f + up * 0.16f), w * 0.30f, Color.White, 0.35f + up * 0.65f)
-            glyph(textMeasurer, "♫", w * 0.94f, top - h * (0.02f + (1f - up) * 0.16f), w * 0.26f, Color.White, 0.35f + (1f - up) * 0.65f)
+            if (small) {
+                glyph(textMeasurer, "♪", w * 0.10f, top - h * (0.0f + up * 0.10f), w * 0.24f, Color.White, 0.35f + up * 0.65f)
+                glyph(textMeasurer, "♫", w * 0.90f, top - h * (0.0f + (1f - up) * 0.10f), w * 0.22f, Color.White, 0.35f + (1f - up) * 0.65f)
+            } else {
+                glyph(textMeasurer, "♪", w * 0.06f, top - h * (0.02f + up * 0.16f), w * 0.30f, Color.White, 0.35f + up * 0.65f)
+                glyph(textMeasurer, "♫", w * 0.94f, top - h * (0.02f + (1f - up) * 0.16f), w * 0.26f, Color.White, 0.35f + (1f - up) * 0.65f)
+            }
         }
         if (mood == MochiMood.Sleepy) {
             // A "z" drifts up as his eyes close.
             val shut = 1f - blink
-            glyph(textMeasurer, "z", w * 0.88f, top - h * (0.06f + shut * 0.14f), w * (0.22f + shut * 0.10f), Color.White, 0.30f + shut * 0.60f)
+            if (small) {
+                glyph(textMeasurer, "z", w * 0.86f, top - h * (0.0f + shut * 0.08f), w * (0.20f + shut * 0.08f), Color.White, 0.30f + shut * 0.60f)
+            } else {
+                glyph(textMeasurer, "z", w * 0.88f, top - h * (0.06f + shut * 0.14f), w * (0.22f + shut * 0.10f), Color.White, 0.30f + shut * 0.60f)
+            }
         }
         if (tired) {
             // One bead of sweat: low battery is exhausting. It slides down and back with `bob`.
@@ -431,7 +471,8 @@ fun MochiGlyph(
             val cy0 = top + bodyH * 0.4f
             for (i in 0 until 6) {
                 val a = wave + i * (2 * PI / 6).toFloat()
-                val orbit = w * (0.52f + 0.10f * sin(wave * 2f + i))
+                // (At island size the confetti orbits inside the box instead of past its sides.)
+                val orbit = w * ((if (small) 0.40f else 0.52f) + (if (small) 0.06f else 0.10f) * sin(wave * 2f + i))
                 drawCircle(
                     color = CONFETTI[i % CONFETTI.size],
                     radius = w * 0.032f,

@@ -101,20 +101,6 @@ private fun moodOf(kind: ActivityKind?): MochiMood = when (kind) {
     else -> MochiMood.Working
 }
 
-private fun shortVerb(kind: ActivityKind?): String = when (kind) {
-    ActivityKind.Thinking -> "Thinking"
-    ActivityKind.Reading -> "Reading"
-    ActivityKind.Editing -> "Editing"
-    ActivityKind.Searching -> "Searching"
-    ActivityKind.Browsing -> "Browsing"
-    ActivityKind.Running -> "Running"
-    ActivityKind.Delegating -> "Delegating"
-    ActivityKind.Planning -> "Planning"
-    ActivityKind.Using -> "Using"
-    ActivityKind.Asking -> "Needs you"
-    else -> ""
-}
-
 /** Left of the collapsed island: Mochi in Claude's colour, with the face of what it is doing. */
 @Composable
 fun AgentCollapsedGlyph(notification: IslandNotification?) {
@@ -132,8 +118,8 @@ fun AgentCollapsedGlyph(notification: IslandNotification?) {
 }
 
 /**
- * Right of the collapsed island: a lock or a question mark when it asks; otherwise the verb of what it is
- * doing (Reading, Editing, Running…) and three dots in that kind's colour taking turns.
+ * Right of the collapsed island: a lock or a question mark when it asks; otherwise three dots taking
+ * turns in the colour of what it is doing (violet thinking, indigo searching, blue working).
  */
 @Composable
 fun AgentCollapsedRight(notification: IslandNotification?) {
@@ -142,19 +128,9 @@ fun AgentCollapsedRight(notification: IslandNotification?) {
             Icon(Icons.Rounded.Lock, "Permission", tint = ReminderAmber, modifier = Modifier.size(15.dp))
         com.agupta07505.smartisland.model.IslandMode.Question ->
             Icon(Icons.Rounded.QuestionMark, "Question", tint = QuestionBlue, modifier = Modifier.size(16.dp))
-        else -> {
-            val kind = kindOf(notification)
-            val color = colorOf(kind)
-            val verb = shortVerb(kind)
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                if (verb.isNotEmpty()) {
-                    Crossfade(targetState = verb, label = "agent-verb") { v ->
-                        Text(v, color = color, fontSize = 10.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-                    }
-                }
-                WorkingDots(color)
-            }
-        }
+        // Only the dots, in the colour of what it is doing: they sit at the right edge, clear of the
+        // camera, which is exactly where a word would have gone under it. The sentence is on the open card.
+        else -> WorkingDots(colorOf(kindOf(notification)))
     }
 }
 

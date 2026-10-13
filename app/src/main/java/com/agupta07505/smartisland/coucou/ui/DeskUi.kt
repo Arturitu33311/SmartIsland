@@ -134,13 +134,10 @@ private fun bubbleMood(lookDir: Float): BubbleMood {
         overdue -> MochiMood.Alert
         scene.batteryLow -> MochiMood.Tired
         scene.greeted -> MochiMood.Happy
+        // Jinx is speaking: it is her mood he wears (and nothing of Claude Code's: that has its own card).
+        scene.jinxMood != null -> scene.jinxMood
         scene.surprised -> MochiMood.Surprised
         scene.glancing -> MochiMood.Glance
-        scene.errored -> MochiMood.Error
-        scene.finished -> MochiMood.Happy
-        scene.searching -> MochiMood.Searching
-        scene.thinking -> MochiMood.Thinking
-        scene.working -> MochiMood.Working
         scene.musicPlaying -> MochiMood.Dancing
         else -> calm
     }

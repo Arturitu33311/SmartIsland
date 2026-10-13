@@ -127,6 +127,19 @@ class MochiReactionTest {
     }
 
     @Test
+    fun his_face_follows_jinx_when_she_speaks_and_nobody_else() {
+        val speaking = note("coucou_jinx", IslandMode.JinxMsg).copy(category = "mochi:Happy:info")
+        assertEquals(com.agupta07505.smartisland.coucou.ui.MochiMood.Happy, MochiReactions.jinxMood(listOf(speaking)))
+        // Nothing from her: nothing to wear. Claude Code's card (or anything else) is not her.
+        assertEquals(null, MochiReactions.jinxMood(emptyList()))
+        assertEquals(null, MochiReactions.jinxMood(listOf(note("coucou_agent", IslandMode.Agent))))
+        // And the scene he reads no longer carries Claude Code's work unless asked to.
+        val scene = MochiReactions.scene(listOf(speaking), now, 0L, 0L, 0L, 0L, jinxMood = MochiReactions.jinxMood(listOf(speaking)))
+        assertEquals(com.agupta07505.smartisland.coucou.ui.MochiMood.Happy, scene.jinxMood)
+        assertFalse(scene.working)
+    }
+
+    @Test
     fun greeting_latches_like_surprise() {
         assertEquals(now + MochiReactions.GREET_MS, MochiReactions.latchGreeting(0L, now))
         assertEquals(now + 9_000, MochiReactions.latchGreeting(now + 9_000, now))

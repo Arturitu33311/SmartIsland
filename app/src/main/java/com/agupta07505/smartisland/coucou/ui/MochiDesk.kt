@@ -134,13 +134,9 @@ fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modif
         overdue > 0 -> MochiMood.Alert
         scene.batteryLow -> MochiMood.Tired
         scene.greeted -> MochiMood.Happy
+        scene.jinxMood != null -> scene.jinxMood
         scene.surprised -> MochiMood.Surprised
         scene.glancing -> MochiMood.Glance
-        scene.errored -> MochiMood.Error
-        scene.finished -> MochiMood.Happy
-        scene.searching -> MochiMood.Searching
-        scene.thinking -> MochiMood.Thinking
-        scene.working -> MochiMood.Working
         scene.musicPlaying -> MochiMood.Dancing
         else -> calm
     }

@@ -45,6 +45,8 @@ data class MochiScene(
     val celebrating: Boolean = false,
     /** Claude Code is working on the laptop: the same blue dots he wears there. */
     val working: Boolean = false,
+    /** Jinx is saying something right now, in this mood: it is her state he shows. */
+    val jinxMood: MochiMood? = null,
     /** Claude Code just finished what it was doing: he is glad (a short happy moment). */
     val finished: Boolean = false,
     /** A tool of Claude Code just failed: flat eyes and a red dot for a moment (as on the laptop). */
@@ -84,6 +86,14 @@ object MochiReactions {
 
     /** The tools that read as "searching" (the laptop's Mochi scans with his eyes for these). */
     val SEARCH_TOOLS = setOf("Grep", "Glob", "WebSearch", "WebFetch")
+
+    /**
+     * Jinx's own card on the island ("mochi:<Mood>:<kind>") gives his face its mood while it is there;
+     * null when she is not saying anything. Her messages carry the mood the server sent.
+     */
+    fun jinxMood(notifications: List<IslandNotification>): MochiMood? =
+        notifications.firstOrNull { it.mode == IslandMode.JinxMsg }
+            ?.let { com.agupta07505.smartisland.coucou.presence.jinxMoodOf(it.category) }
 
     fun isMusicPlaying(notifications: List<IslandNotification>): Boolean =
         notifications.any { it.mode == IslandMode.Music && it.mediaIsPlaying }
@@ -157,8 +167,10 @@ object MochiReactions {
         peerLimit: Boolean = false,
         searching: Boolean = false,
         thinking: Boolean = false,
+        jinxMood: MochiMood? = null,
     ): MochiScene =
         MochiScene(
+            jinxMood = jinxMood,
             errored = errorUntil > now,
             searching = working && searching,
             thinking = working && thinking && !searching,
@@ -260,37 +272,9 @@ fun rememberMochiScene(): MochiScene {
             glanceUntil = maxOf(glanceUntil, now + MochiReactions.GLANCE_MS)
         }
     }
-    // Claude Code at work on the laptop: dots while it works, a glad moment when it stops.
-    val agents by CoucouRuntime.agentUi.collectAsState()
-    val working = agents.status == AgentUi.Status.Connected && agents.sessions.any { it.state == SessionState.Working }
-    var finishedUntil by remember { mutableLongStateOf(0L) }
-    var wasWorking by remember { mutableStateOf(false) }
-    LaunchedEffect(working) {
-        if (wasWorking && !working) finishedUntil = System.currentTimeMillis() + MochiReactions.FINISHED_MS
-        wasWorking = working
-    }
-    LaunchedEffect(finishedUntil) {
-        val remaining = finishedUntil - System.currentTimeMillis()
-        if (remaining > 0) {
-            delay(remaining)
-            finishedUntil = 0L
-        }
-    }
-    // A failed tool: he winces for a moment (a failure older than a few seconds is not news).
-    var errorUntil by remember { mutableLongStateOf(0L) }
-    LaunchedEffect(agents.failedAt) {
-        val age = System.currentTimeMillis() - agents.failedAt
-        if (agents.failedAt > 0 && age < MochiReactions.ERROR_MS) errorUntil = agents.failedAt + MochiReactions.ERROR_MS
-    }
-    LaunchedEffect(errorUntil) {
-        val remaining = errorUntil - System.currentTimeMillis()
-        if (remaining > 0) {
-            delay(remaining)
-            errorUntil = 0L
-        }
-    }
+    // (Claude Code's work is not shown on him: the Mochi of the island is Jinx's, and its own card on the
+    // main pill says what Claude Code is doing. Only what Jinx herself says moves his face.)
     val peerMusic by DeviceActivity.peerMusic.collectAsState()
-    val peerLimit by DeviceActivity.peerLimit.collectAsState()
     // Every unlock re-opens the hello (same moment the padlock badge shows)…
     val unlockMs = rememberUnlockMs()
     LaunchedEffect(unlockMs) {
@@ -306,10 +290,8 @@ fun rememberMochiScene(): MochiScene {
     }
     return MochiReactions.scene(
         notifications, System.currentTimeMillis(), surprisedUntil, greetedUntil, glanceUntil, 0L,
-        peerMusic = peerMusic, working = working, finishedUntil = finishedUntil, errorUntil = errorUntil,
-        peerLimit = peerLimit,
-        searching = agents.sessions.any { it.state == SessionState.Working && it.tool in MochiReactions.SEARCH_TOOLS },
-        thinking = agents.sessions.any { it.state == SessionState.Working && it.tool.isEmpty() },
+        peerMusic = peerMusic,
+        jinxMood = MochiReactions.jinxMood(notifications),
     )
 }
 
