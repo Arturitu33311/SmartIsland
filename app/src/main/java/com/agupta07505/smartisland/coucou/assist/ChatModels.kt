@@ -21,7 +21,8 @@ data class ChatLine(
 
 sealed interface ChatEvent {
     data object Ack : ChatEvent
-    data class Done(val mode: String, val text: String) : ChatEvent
+    /** [mirrored]: the gateway confirms both lines reached Telegram (true for gateways that do not say). */
+    data class Done(val mode: String, val text: String, val mirrored: Boolean = true) : ChatEvent
     data class Failure(val msg: String) : ChatEvent
     data class History(val items: List<ChatLine>) : ChatEvent
     data class Merged(val added: Int, val items: List<ChatLine>, val mirroredIds: List<String>) : ChatEvent
@@ -72,7 +73,7 @@ object ChatProtocol {
         val o = runCatching { JSONObject(l.trim()) }.getOrNull() ?: return@mapNotNull null
         when (o.optString("ev")) {
             "ack" -> ChatEvent.Ack
-            "done" -> ChatEvent.Done(o.optString("mode"), o.optString("text"))
+            "done" -> ChatEvent.Done(o.optString("mode"), o.optString("text"), o.optBoolean("mirrored", true))
             "error" -> ChatEvent.Failure(o.optString("msg", "error"))
             "history" -> ChatEvent.History(lines(o.optJSONArray("items")))
             "merged" -> ChatEvent.Merged(

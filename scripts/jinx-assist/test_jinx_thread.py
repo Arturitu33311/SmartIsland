@@ -59,6 +59,17 @@ class ThreadTest(unittest.TestCase):
         self.assertEqual([d["id"] for d in added], ["c1:s22"])
         self.assertEqual([d["text"] for d in self.t.read()], ["a", "b"])
 
+    def test_merge_never_unmirrors_and_adopts_a_mirrored_flag(self):
+        self.t.append("s21", "a", cid="c1", ts=1.0, mirrored=False)
+        self.t.append("s21", "b", cid="c2", ts=2.0, mirrored=True)
+        added = self.t.merge([
+            {"id": "c1:s21", "ts": 1.0, "src": "s21", "text": "a", "cid": "c1", "mirrored": True},
+            {"id": "c2:s21", "ts": 2.0, "src": "s21", "text": "b", "cid": "c2", "mirrored": False},
+        ])
+        self.assertEqual(added, [])
+        by = {d["id"]: d["mirrored"] for d in self.t.read()}
+        self.assertEqual(by, {"c1:s21": True, "c2:s21": True})
+
     def test_since_returns_only_unknown_lines(self):
         a = self.t.append("tg", "a", ts=1.0)
         self.t.append("tg", "b", ts=2.0)

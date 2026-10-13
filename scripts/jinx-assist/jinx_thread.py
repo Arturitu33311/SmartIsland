@@ -100,16 +100,26 @@ class Thread:
         with self._locked():
             lines = self._read()
             known = {d["id"] for d in lines}
+            by_id = {d["id"]: d for d in lines}
             added = []
+            flags_changed = False
             for d in incoming:
-                if not _valid(d) or d["id"] in known:
+                if not _valid(d):
+                    continue
+                if d["id"] in known:
+                    # "espejado" sólo sube: nunca se desmarca, y se adopta si otro dispositivo ya lo espejó.
+                    cur = by_id[d["id"]]
+                    if d.get("mirrored") is True and not cur["mirrored"]:
+                        cur["mirrored"] = True
+                        flags_changed = True
                     continue
                 d = {"id": d["id"], "ts": d["ts"], "src": d["src"], "text": d["text"],
                      "cid": d.get("cid"), "mirrored": bool(d.get("mirrored", False))}
                 known.add(d["id"])
+                by_id[d["id"]] = d
                 lines.append(d)
                 added.append(d)
-            if added:
+            if added or flags_changed:
                 lines.sort(key=lambda d: d["ts"])  # estable: empates conservan el orden
                 self._write(lines)
             return added

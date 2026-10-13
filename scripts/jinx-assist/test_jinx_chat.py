@@ -51,7 +51,7 @@ class GatewayTest(unittest.TestCase):
     def test_send_answers_stores_both_lines_and_mirrors(self):
         ev = self.events({"op": "send", "text": "hola", "cid": "c1", "src": "s21"})
         self.assertEqual(ev[0], {"ev": "ack"})
-        self.assertEqual(ev[-1], {"ev": "done", "mode": "or", "text": "respuesta"})
+        self.assertEqual(ev[-1], {"ev": "done", "mode": "or", "text": "respuesta", "mirrored": True})
         ids = [d["id"] for d in self.thread.read()]
         self.assertEqual(ids, ["c1:s21", "c1:jinx"])
         self.assertEqual(self.mirror.sent, ["📱 hola", "🟠 respuesta"])
@@ -61,7 +61,7 @@ class GatewayTest(unittest.TestCase):
         self.events({"op": "send", "text": "hola", "cid": "c1", "src": "s21"})
         ev = self.events({"op": "send", "text": "hola", "cid": "c1", "src": "s21"})
         self.assertEqual(len(self.brain.calls), 1)
-        self.assertEqual(ev[-1], {"ev": "done", "mode": "cached", "text": "respuesta"})
+        self.assertEqual(ev[-1], {"ev": "done", "mode": "cached", "text": "respuesta", "mirrored": True})
         self.assertEqual(len(self.thread.read()), 2)
 
     def test_context_given_to_the_model_includes_telegram_lines(self):
@@ -123,6 +123,46 @@ class GatewayTest(unittest.TestCase):
         self.assertEqual([d["text"] for d in ev["items"]], ["de telegram", "sin red"])
         self.assertEqual(ev["mirrored_ids"], ["c9:s22"])
         self.assertEqual(self.mirror.sent, ["📱 sin red"])
+
+    def test_concurrent_sends_of_the_same_cid_call_the_model_once(self):
+        import threading
+        import time
+
+        class SlowBrain(FakeBrain):
+            def reply(self, messages):
+                time.sleep(0.3)
+                return super().reply(messages)
+
+        self.deps.brain = SlowBrain()
+        results = []
+
+        def work():
+            results.append(list(handle({"op": "send", "text": "hola", "cid": "c1", "src": "s21"}, self.deps)))
+
+        ts = [threading.Thread(target=work) for _ in range(2)]
+        [t.start() for t in ts]
+        [t.join() for t in ts]
+        self.assertEqual(len(self.deps.brain.calls), 1)
+        self.assertEqual([r[-1]["text"] for r in results], ["respuesta", "respuesta"])
+        self.assertEqual(len(self.thread.read()), 2)
+
+    def test_done_reports_whether_the_lines_reached_telegram(self):
+        ev = self.events({"op": "send", "text": "a", "cid": "c1", "src": "s21"})
+        self.assertIs(ev[-1]["mirrored"], True)
+        self.mirror.ok = False
+        ev = self.events({"op": "send", "text": "b", "cid": "c2", "src": "s21"})
+        self.assertIs(ev[-1]["mirrored"], False)
+        ev = self.events({"op": "send", "text": "b", "cid": "c2", "src": "s21"})
+        self.assertEqual(ev[-1]["mode"], "cached")
+        self.assertIs(ev[-1]["mirrored"], False)
+
+    def test_merge_reports_every_sent_line_that_is_mirrored_even_if_not_by_this_call(self):
+        self.thread.append("s22", "ya espejada", cid="c9", ts=5.0, mirrored=True)
+        incoming = [{"id": "c9:s22", "ts": 5.0, "src": "s22", "text": "ya espejada",
+                     "cid": "c9", "mirrored": False}]
+        ev = self.events({"op": "merge", "lines": incoming, "have": []})[-1]
+        self.assertEqual(ev["added"], 0)
+        self.assertEqual(ev["mirrored_ids"], ["c9:s22"])
 
     def test_core_returns_persona_and_memory(self):
         self.assertEqual(self.events({"op": "core"})[-1],

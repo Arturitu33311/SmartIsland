@@ -117,6 +117,23 @@ class AssistModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Brings the laptop's lines and persona, retries what is pending and repeats unmirrored lines to Telegram. */
+    fun syncNow() {
+        if (_ui.value.busy) return
+        _ui.value = _ui.value.copy(busy = true, notice = "")
+        viewModelScope.launch(Dispatchers.IO) {
+            val persona = runCatching { refreshPersona(laptopApi, personas) }
+            val added = repo.sync()
+            repo.retryPending()
+            repo.flushMirror()
+            _ui.value = _ui.value.copy(
+                lines = store.all(),
+                busy = false,
+                notice = if (persona.isSuccess) "Sincronizado ($added mensajes nuevos)." else "La laptop no responde; sigo con lo que tengo.",
+            )
+        }
+    }
+
     /** One time: the laptop gateway hands this phone the OpenRouter key and Telegram bot (needs ALLOW_PROVISION there). */
     fun provision() {
         viewModelScope.launch(Dispatchers.IO) {
@@ -164,7 +181,8 @@ private fun AssistScreen(model: AssistModel) {
                 Text("Jinx", color = Color.White, fontSize = 18.sp)
                 if (ui.badge.isNotEmpty()) Text(ui.badge, color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
             }
-            TextButton(onClick = { model.provision() }) { Text("Sincronizar") }
+            TextButton(onClick = { model.syncNow() }) { Text("Sincronizar") }
+            TextButton(onClick = { model.provision() }) { Text("Provisionar (1.ª vez)") }
         }
         if (agents.sessions.isNotEmpty()) {
             Text(

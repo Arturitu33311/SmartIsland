@@ -4,6 +4,9 @@ Lee UNA línea JSON de stdin y escribe eventos NDJSON en stdout. Ver
 docs/superpowers/specs/2026-10-13-jinx-assistant-text-design.md.
 No hace getUpdates ni toca webhooks: sólo sendMessage.
 """
+import contextlib
+import fcntl
+import hashlib
 import importlib.machinery
 import importlib.util
 import json
@@ -51,6 +54,26 @@ def _mirror_pending(deps):
     return done
 
 
+@contextlib.contextmanager
+def _cid_lock(base, cid):
+    """Serializa los envíos del mismo cid (un reintento espera a la primera generación y la reutiliza).
+
+    Se usa un número fijo de archivos de candado (hash del cid) para que no se acumulen.
+    """
+    bucket = int(hashlib.sha1(cid.encode("utf-8")).hexdigest(), 16) % 64
+    with open(os.path.join(base, "inflight-%02d.lock" % bucket), "a+") as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lf, fcntl.LOCK_UN)
+
+
+def _mirrored(deps, ids):
+    by_id = {d["id"]: d for d in deps.thread.read()}
+    return all(by_id.get(i, {}).get("mirrored") for i in ids)
+
+
 def _send(req, deps):
     text = req.get("text")
     cid = req.get("cid")
@@ -61,22 +84,26 @@ def _send(req, deps):
     if src not in SRCS:
         yield _err("src desconocido")
         return
-    cached = deps.thread.answer_for(cid)
-    if cached:
+    ids = ["%s:%s" % (cid, src), "%s:jinx" % cid]
+    with _cid_lock(deps.base, cid):
+        cached = deps.thread.answer_for(cid)
+        if cached:
+            _mirror_pending(deps)
+            yield {"ev": "ack"}
+            yield {"ev": "done", "mode": "cached", "text": cached["text"],
+                   "mirrored": _mirrored(deps, ids)}
+            return
+        deps.thread.append(src, text, cid=cid)
         yield {"ev": "ack"}
-        yield {"ev": "done", "mode": "cached", "text": cached["text"]}
-        return
-    deps.thread.append(src, text, cid=cid)
-    yield {"ev": "ack"}
-    try:
-        mode, out = deps.brain.reply(deps.thread.context())
-    except Exception as e:  # noqa: BLE001 - el modelo puede fallar de mil formas
-        yield _err("no pude generar respuesta: %s" % e)
-        return
-    out = (out or "").strip() or "(sin respuesta)"
-    deps.thread.append("jinx", out, cid=cid)
-    _mirror_pending(deps)
-    yield {"ev": "done", "mode": mode, "text": out}
+        try:
+            mode, out = deps.brain.reply(deps.thread.context())
+        except Exception as e:  # noqa: BLE001 - el modelo puede fallar de mil formas
+            yield _err("no pude generar respuesta: %s" % e)
+            return
+        out = (out or "").strip() or "(sin respuesta)"
+        line = deps.thread.append("jinx", out, cid=cid)
+        _mirror_pending(deps)
+        yield {"ev": "done", "mode": mode, "text": line["text"], "mirrored": _mirrored(deps, ids)}
 
 
 def handle(req, deps):
@@ -94,11 +121,13 @@ def handle(req, deps):
             yield _err("merge necesita lines y have")
             return
         added = deps.thread.merge(lines)
-        mirrored = _mirror_pending(deps)
+        _mirror_pending(deps)
         sent_ids = {d["id"] for d in lines if isinstance(d, dict) and isinstance(d.get("id"), str)}
+        # Todo lo que el teléfono mandó y que YA está espejado en el hilo (por esta llamada o antes).
+        mirrored_ids = [d["id"] for d in deps.thread.read() if d["id"] in sent_ids and d["mirrored"]]
         yield {"ev": "merged", "added": len(added),
                "items": deps.thread.since({h for h in have if isinstance(h, str)}),
-               "mirrored_ids": [i for i in mirrored if i in sent_ids]}
+               "mirrored_ids": mirrored_ids}
     elif op == "core":
         yield {"ev": "core", "core": deps.core_text, "memory": deps.memory_text}
     elif op == "provision":

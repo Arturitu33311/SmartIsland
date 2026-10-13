@@ -29,6 +29,13 @@ class ChatProtocolTest {
         assertEquals(listOf(ChatEvent.Ack, ChatEvent.Done("or", "qué onda")), ev)
     }
 
+    @Test fun doneCarriesTheMirrorConfirmationAndDefaultsToTrueForOldGateways() {
+        val withFlag = ChatProtocol.parse("""{"ev":"done","mode":"or","text":"x","mirrored":false}""").single()
+        assertEquals(ChatEvent.Done("or", "x", false), withFlag)
+        val old = ChatProtocol.parse("""{"ev":"done","mode":"or","text":"x"}""").single()
+        assertEquals(ChatEvent.Done("or", "x", true), old)
+    }
+
     @Test fun expectDoneReturnsTheAnswer() {
         val done = ChatProtocol.expectDone("{\"ev\":\"ack\"}\n{\"ev\":\"done\",\"mode\":\"cached\",\"text\":\"x\"}")
         assertEquals("x", done.text)

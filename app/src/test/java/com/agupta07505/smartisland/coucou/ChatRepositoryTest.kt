@@ -20,6 +20,7 @@ import java.io.File
 private class FakeLaptop : ChatApi {
     var down = false
     var answer = "desde la laptop"
+    var answerMirrored = true
     val sent = mutableListOf<String>()
     var mergedWith: List<ChatLine> = emptyList()
     var toGive: List<ChatLine> = emptyList()
@@ -27,7 +28,7 @@ private class FakeLaptop : ChatApi {
     override fun send(text: String, cid: String, src: String): ChatEvent.Done {
         if (down) throw ChatException("laptop no disponible")
         sent += "$cid|$text|$src"
-        return ChatEvent.Done("or", answer)
+        return ChatEvent.Done("or", answer, answerMirrored)
     }
     override fun merge(lines: List<ChatLine>, have: List<String>): ChatEvent.Merged {
         if (down) throw ChatException("laptop no disponible")
@@ -69,6 +70,12 @@ class ChatRepositoryTest {
         assertEquals(0, b.calls)
         assertEquals(listOf("c1|hola|s21"), lap.sent)
         assertTrue(s.unmirrored().isEmpty()) // the laptop mirrors by itself
+    }
+
+    @Test fun laptopAnswerNotConfirmedAsMirroredStaysQueuedHere() {
+        val s = store(); val lap = FakeLaptop().apply { answerMirrored = false }
+        repo(s, lap, emptyList()).send("hola")
+        assertEquals(2, s.unmirrored().size)
     }
 
     @Test fun laptopDownFallsBackToCloudThenLocal() {
