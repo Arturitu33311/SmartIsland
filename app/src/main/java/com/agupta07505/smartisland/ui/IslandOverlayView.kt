@@ -122,12 +122,7 @@ fun IslandOverlayView(
     isInputActive: Boolean = false,
     onReplyStateChanged: (Boolean) -> Unit = {},
     onDismissAllNotifications: () -> Unit = {},
-    isFullWidth: Boolean = true,
-    // How far the overlay window's centre sits from the screen's centre, in px: 0 for a full-width
-    // window, the group's offset for the pill-sized one. All the geometry below is worked out against
-    // the screen's centre, and this one number (which changes in the same moment as the window does)
-    // places it inside whichever window there is, so nothing has to glide when the window resizes.
-    windowShiftPx: Int = 0
+    isFullWidth: Boolean = true
 ) {
     // Fix #1: rememberUpdatedState ensures the lambda is always fresh
     // even though pointerInput(Unit) never restarts its coroutine
@@ -480,7 +475,7 @@ fun IslandOverlayView(
                     .width(settings.width.dp)
                     .height(settings.height.dp)
                     .graphicsLayer {
-                        translationX = collapsedMainOffset.toPx() - windowShiftPx
+                        translationX = collapsedMainOffset.toPx()
                     }
                     .pointerInput(Unit) {
                         detectTapGestures {
@@ -540,7 +535,7 @@ fun IslandOverlayView(
                     // top-center-aligned box makes a near-zero-width pill drift
                     // left/right at the very start/end of the morph (reads as flicker).
                     val widthPx = size.width
-                    translationX = animatedXOffset.toPx() - windowShiftPx + (if (!currentExpanded) pillDragOffsetX else 0f)
+                    translationX = animatedXOffset.toPx() + (if (!currentExpanded) pillDragOffsetX else 0f)
                     scaleX = if (widthPx > 0f) switchScaleAnim.value else 1f
                     scaleY = if (widthPx > 0f) switchScaleAnim.value else 1f
                     translationY = yOffset.toPx() + dragOffset
@@ -995,7 +990,7 @@ fun IslandOverlayView(
                 modifier = Modifier
                     .absoluteOffset {
                         IntOffset(
-                            secondaryOffset.roundToPx() - windowShiftPx,
+                            secondaryOffset.roundToPx(),
                             0
                         )
                     }

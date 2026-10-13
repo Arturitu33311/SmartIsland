@@ -78,18 +78,13 @@ class SmartIslandOverlayService : AccessibilityService() {
     private var isWindowExpanded: Boolean = false
     private var collapseJob: kotlinx.coroutines.Job? = null
 
-    // Without the touchable-region hook the window really changes size (pill-sized <-> full screen).
-    // For the first frames after such a resize the system still shows the previous buffer at the new
-    // origin, which reads as the island jumping sideways. These hide that: the view is made transparent,
-    // resized, and shown again once frames at the new size have been drawn. [windowReady] holds the
-    // expand animation back until then, so it starts from a window that is already the right size.
-    private val windowReady = MutableStateFlow(true)
-
-    // Where the window's centre is from the screen's centre (px; 0 when it is full width), published
-    // in the same moment the window is resized so the Compose geometry follows it exactly.
-    private val windowShiftPx = MutableStateFlow(0)
-    private var maskJob: kotlinx.coroutines.Job? = null
-    private var pendingParams: WindowManager.LayoutParams? = null
+    // Without the touchable-region hook the island window cannot be made to take touches only on the pill
+    // (and it must not eat the status bar around it). So it is split in two: the island window is always as
+    // wide as the screen and draws everything, and while the island is closed it takes no touches at all; a
+    // second, pill-sized window (the proxy) takes them and hands them to it. Nothing is ever resized
+    // sideways, so there is nothing to jump or to cover up.
+    private var touchProxy: android.view.View? = null
+    private var touchProxyParams: WindowManager.LayoutParams? = null
     private var lastParams: WindowManager.LayoutParams? = null
 
     private val torchCallback = object : android.hardware.camera2.CameraManager.TorchCallback() {
@@ -503,8 +498,6 @@ class SmartIslandOverlayService : AccessibilityService() {
                 setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
                 setContent {
                     val fullWidth by isTouchableRegionSupported.collectAsState()
-                    val ready by windowReady.collectAsState()
-                    val shift by windowShiftPx.collectAsState()
                     OverlayIsland(
                         viewModel = this@SmartIslandOverlayService.viewModel,
                         statusBarHeight = statusBarHeight,
@@ -515,9 +508,7 @@ class SmartIslandOverlayService : AccessibilityService() {
                             performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
                             viewModel.collapse()
                         },
-                        isFullWidth = fullWidth,
-                        windowShiftPx = shift,
-                        windowReady = ready
+                        isFullWidth = fullWidth
                     )
                 }
 
@@ -528,6 +519,8 @@ class SmartIslandOverlayService : AccessibilityService() {
             } ?: run {
                 islandView = null
             }
+            // Where the window is split in two, the touch window goes up with it.
+            if (islandView != null) updateWindowLayoutParams(isWindowExpanded, viewModel.settings.value)
         } catch (e: Exception) {
             android.util.Log.e(TAG, "ensureCollapsedWindow fatal", e)
             islandView = null
@@ -694,25 +687,25 @@ class SmartIslandOverlayService : AccessibilityService() {
         val groupCenterPx = (groupStartPx + groupEndPx) / 2f
         val windowXPx = (groupCenterPx - screenWidthPx / 2f).toInt()
 
+        // The island window is always full width (see [touchProxy]); only its height follows the island.
+        val dual = !isTouchableRegionSupported.value
+        val untouchable = dual && !expanded
         val h = if (expanded) {
             WindowManager.LayoutParams.MATCH_PARENT
         } else {
             ((settings.height + 16f) * density).toInt()
         }
-        val w = if (expanded || isTouchableRegionSupported.value) {
-            WindowManager.LayoutParams.MATCH_PARENT
-        } else {
-            (groupWidthPx + 32f * density).toInt()
-        }
+        val w = WindowManager.LayoutParams.MATCH_PARENT
         val isInput = viewModel.isInputActive.value && expanded
         val focusFlags = if (isInput) 0 else WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
         val currentFlags = focusFlags or
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-            WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
+            WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED or
+            (if (untouchable) WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE else 0)
 
-        val currentX = if (expanded || isTouchableRegionSupported.value) 0 else windowXPx
+        val currentX = 0
         val currentY = if (settings.enableNotchMode) 0 else settings.yOffset.dpToPx()
         val currentSoftInputMode = if (isInput) {
             WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or
@@ -725,6 +718,10 @@ class SmartIslandOverlayService : AccessibilityService() {
         // (zero GPU cost in-app). Only on API 31+, where windows can ask for it; elsewhere 0.
         val targetBlur = if (expanded && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) 45 else 0
 
+        val proxyWanted = untouchable && view.visibility == android.view.View.VISIBLE
+        val proxyWidth = (groupWidthPx + 32f * density).toInt()
+        val proxyHeight = ((settings.height + 16f) * density).toInt()
+
         val lp = lastParams
         if (lp != null &&
             lp.width == w &&
@@ -735,6 +732,7 @@ class SmartIslandOverlayService : AccessibilityService() {
             lp.softInputMode == currentSoftInputMode &&
             (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || lp.blurBehindRadius == targetBlur)
         ) {
+            syncTouchProxy(proxyWanted, proxyWidth, proxyHeight, windowXPx, currentY)
             return
         }
 
@@ -756,114 +754,80 @@ class SmartIslandOverlayService : AccessibilityService() {
                 blurBehindRadius = targetBlur
             }
         }
-        val resizes = lp != null && (lp.width != w || lp.x != currentX)
         lastParams = params
-        if (maskJob?.isActive == true) {
-            // A masked resize is under way: it applies whatever was asked for last.
-            pendingParams = params
-            return
-        }
-        if (resizes && view.isAttachedToWindow && view.visibility == android.view.View.VISIBLE) {
-            applyWindowResizeMasked(view, params, previous = lp, growing = expanded)
-            return
-        }
         runCatchingLogged(TAG, "Failed to update view layout") {
             windowManager.updateViewLayout(view, params)
         }
-        publishWindowShift(params)
-    }
-
-    private fun publishWindowShift(p: WindowManager.LayoutParams) {
-        windowShiftPx.value = if (p.width == WindowManager.LayoutParams.MATCH_PARENT) 0 else p.x
+        syncTouchProxy(proxyWanted, proxyWidth, proxyHeight, windowXPx, currentY)
     }
 
     /**
-     * Resizes the overlay window without showing the stale frames the system keeps for a moment
-     * (see [windowReady]). A still picture of the pill is put in a second, touch-less window right
-     * over it, the real view is hidden, resized and shown again, and only then is the picture taken
-     * away: what the person sees never changes, so there is nothing to blink. If the picture cannot
-     * be taken the view is just hidden across the resize.
+     * The pill-sized window that takes the touches while the island is closed and the touchable-region hook
+     * is not available: it sits over the pill (and its bubble), and whatever lands on it is handed, with the
+     * coordinates moved to where the island window draws, to the island's own view. Present only while
+     * closed; open, the island window takes touches itself.
      */
-    private fun applyWindowResizeMasked(
-        view: android.view.View,
-        params: WindowManager.LayoutParams,
-        previous: WindowManager.LayoutParams?,
-        growing: Boolean,
-    ) {
-        pendingParams = params
-        if (growing) windowReady.value = false
-        // The pill-sized window is the one worth a picture: the old one when growing, the new one when shrinking.
-        val small = if (growing) previous else params
-        val ghost = small?.let { addGhostWindow(view, it) }
-        maskJob = serviceScope.launch {
-            try {
-                // One frame so the picture is on screen before the real view goes away.
-                if (ghost != null) kotlinx.coroutines.delay(WINDOW_GHOST_SETTLE_MS)
-                view.alpha = 0f
-                // Two frames drawn transparent, so nothing out of place is left to be shown...
-                kotlinx.coroutines.delay(WINDOW_MASK_BEFORE_MS)
-                pendingParams?.let { p ->
-                    runCatchingLogged(TAG, "Failed to update view layout") { windowManager.updateViewLayout(view, p) }
-                    publishWindowShift(p)
-                }
-                // ...and two more at the new size before he is shown again.
-                kotlinx.coroutines.delay(WINDOW_MASK_AFTER_MS)
-            } finally {
-                view.alpha = 1f
-                windowReady.value = true
-                pendingParams = null
-                if (ghost != null) {
-                    // He is back under the picture; let one frame show him there, then drop it.
-                    view.postOnAnimationDelayed({ removeGhostWindow(ghost) }, WINDOW_GHOST_SETTLE_MS)
+    private fun syncTouchProxy(want: Boolean, width: Int, height: Int, x: Int, y: Int) {
+        val existing = touchProxy
+        if (!want) {
+            if (existing != null) {
+                touchProxy = null
+                touchProxyParams = null
+                runCatchingLogged(TAG, "Failed to remove the touch window") {
+                    if (existing.isAttachedToWindow) windowManager.removeViewImmediate(existing)
                 }
             }
+            return
         }
-    }
-
-    private fun addGhostWindow(view: android.view.View, small: WindowManager.LayoutParams): android.view.View? {
-        return runCatchingLogged(TAG, "Failed to add the resize picture") {
-            val w = if (small.width > 0) small.width else view.width
-            val h = if (small.height > 0) small.height else view.height
-            if (w <= 0 || h <= 0 || view.width <= 0 || view.height <= 0) return@runCatchingLogged null
-            // Where the pill-sized window sits inside the view being drawn (the view is as wide as the
-            // window it lives in: the pill-sized one itself, or the full-screen one).
-            val left = if (view.width == w) 0 else ((view.width - w) / 2f + small.x).toInt()
-            val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
-            val canvas = android.graphics.Canvas(bmp)
-            canvas.translate(-left.toFloat(), 0f)
-            view.draw(canvas)
-            val image = android.widget.ImageView(this).apply {
-                setImageBitmap(bmp)
-                scaleType = android.widget.ImageView.ScaleType.FIT_XY
+        val p = WindowManager.LayoutParams(
+            width,
+            height,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            this.x = x
+            this.y = y
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
+        if (existing == null) {
+            val v = android.view.View(this).apply {
                 importantForAccessibility = android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                setOnTouchListener { self, ev -> forwardTouch(self, ev) }
             }
-            val lp = WindowManager.LayoutParams(
-                w,
-                h,
-                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                    WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
-                PixelFormat.TRANSLUCENT
-            ).apply {
-                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                x = small.x
-                y = small.y
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-                }
+            touchProxy = v
+            touchProxyParams = p
+            runCatchingLogged(TAG, "Failed to add the touch window") { windowManager.addView(v, p) } ?: run {
+                touchProxy = null
+                touchProxyParams = null
             }
-            windowManager.addView(image, lp)
-            image as android.view.View
+        } else {
+            val old = touchProxyParams
+            if (old == null || old.width != p.width || old.height != p.height || old.x != p.x || old.y != p.y) {
+                touchProxyParams = p
+                runCatchingLogged(TAG, "Failed to move the touch window") { windowManager.updateViewLayout(existing, p) }
+            }
         }
     }
 
-    private fun removeGhostWindow(ghost: android.view.View) {
-        runCatchingLogged(TAG, "Failed to remove the resize picture") {
-            if (ghost.isAttachedToWindow) windowManager.removeViewImmediate(ghost)
-        }
+    private fun forwardTouch(proxy: android.view.View, ev: android.view.MotionEvent): Boolean {
+        val target = islandView ?: return false
+        val a = IntArray(2)
+        val b = IntArray(2)
+        proxy.getLocationOnScreen(a)
+        target.getLocationOnScreen(b)
+        val copy = android.view.MotionEvent.obtain(ev)
+        copy.offsetLocation((a[0] - b[0]).toFloat(), (a[1] - b[1]).toFloat())
+        target.dispatchTouchEvent(copy)
+        copy.recycle()
+        // Always ours: the gesture started on the pill and stays with it until it ends.
+        return true
     }
 
     private fun removeCollapsedWindow() {
@@ -872,6 +836,7 @@ class SmartIslandOverlayService : AccessibilityService() {
         // even when an OEM WindowManager throws while detaching an already-removed view.
         islandView = null
         lastParams = null
+        syncTouchProxy(false, 0, 0, 0, 0)
         isWindowExpanded = false
         collapseJob?.cancel()
         collapseJob = null
@@ -906,16 +871,14 @@ class SmartIslandOverlayService : AccessibilityService() {
         val groupCenterPx = (groupStartPx + groupEndPx) / 2f
         val windowXPx = (groupCenterPx - screenWidthPx / 2f).toInt()
         
-        val w = if (isTouchableRegionSupported.value) {
-            WindowManager.LayoutParams.MATCH_PARENT
-        } else {
-            (groupWidthPx + 32f * density).toInt()
-        }
+        val w = WindowManager.LayoutParams.MATCH_PARENT
+        // Split in two while the touchable-region hook is missing: this window only draws (see touchProxy).
         val currentFlags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-            WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
+            WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED or
+            (if (isTouchableRegionSupported.value) 0 else WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
 
         return WindowManager.LayoutParams(
             w,
@@ -925,14 +888,13 @@ class SmartIslandOverlayService : AccessibilityService() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            x = if (isTouchableRegionSupported.value) 0 else windowXPx
+            x = 0
             y = if (settings.enableNotchMode) 0 else settings.yOffset.dpToPx()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             }
         }.also {
             lastParams = it
-            publishWindowShift(it)
         }
     }
 
@@ -1142,8 +1104,5 @@ class SmartIslandOverlayService : AccessibilityService() {
         // Must cover the longest spring settle (~520f stiffness) of the collapse
         // morph so the window is only shrunk after the pill has visually landed.
         private const val COLLAPSE_WINDOW_DELAY_MS = 650L
-        private const val WINDOW_MASK_BEFORE_MS = 34L
-        private const val WINDOW_MASK_AFTER_MS = 34L
-        private const val WINDOW_GHOST_SETTLE_MS = 20L
     }
 }
