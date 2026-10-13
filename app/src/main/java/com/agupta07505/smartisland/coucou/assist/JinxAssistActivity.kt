@@ -189,6 +189,7 @@ private fun AssistScreen(model: AssistModel) {
             modifier = Modifier.fillMaxWidth(),
             placeholder = { Text("Escríbele a Jinx") },
             enabled = !ui.busy,
+            singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
             keyboardActions = KeyboardActions(onSend = { model.send(draft); draft = "" }),
         )
