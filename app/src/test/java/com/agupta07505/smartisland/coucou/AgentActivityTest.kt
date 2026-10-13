@@ -72,6 +72,74 @@ class AgentActivityTest {
         assertEquals("1 h 05 min", AgentActivity.elapsed(3_900_000))
     }
 
+    private fun request(id: String, session: String, tool: String, at: Long) = RemoteMsg.Request(
+        com.agupta07505.smartisland.coucou.agents.Pending(
+            id = id, isQuestion = false, session = session, project = "coucou", tool = tool, detail = "ls",
+            questions = emptyList(), timeoutS = 108, receivedAt = at,
+        ),
+    )
+
+    @Test
+    fun a_request_answered_at_the_terminal_does_not_outlive_the_turn() {
+        val m = AgentModel()
+        m.apply(RemoteMsg.Event("UserPromptSubmit", "s1", "coucou", "", "", ""), 1_000)
+        m.apply(request("r1", "s1", "Bash", 2_000), 2_000)
+        assertEquals(SessionState.NeedsYou, m.view(2_100).single().state)
+        // Answered where the laptop could not tell the phone; the turn then ends.
+        m.apply(RemoteMsg.Event("Stop", "s1", "coucou", "", "", ""), 9_000)
+        val s = m.view(9_100).single()
+        assertEquals(SessionState.Idle, s.state)
+        assertTrue(s.finished)
+        assertTrue(m.pending.isEmpty())
+    }
+
+    @Test
+    fun the_tool_running_proves_its_own_request_over_and_only_its_own() {
+        val m = AgentModel()
+        m.apply(request("r1", "s1", "Bash", 1_000), 1_000)
+        m.apply(request("r2", "s1", "Edit", 1_100), 1_100)
+        m.apply(RemoteMsg.Event("PostToolUse", "s1", "coucou", "Bash", "ls", ""), 2_000)
+        assertEquals(listOf("r2"), m.pending.keys.toList())
+        assertEquals(SessionState.NeedsYou, m.view(2_100).single().state)
+    }
+
+    @Test
+    fun a_run_that_ended_is_done_for_a_few_seconds_then_idle() {
+        val m = AgentModel()
+        m.apply(RemoteMsg.Event("UserPromptSubmit", "s1", "coucou", "", "", ""), 10_000)
+        m.apply(RemoteMsg.Event("PreToolUse", "s1", "coucou", "Bash", "ls", ""), 12_000)
+        m.apply(RemoteMsg.Event("Stop", "s1", "coucou", "", "", ""), 70_000)
+        val done = m.view(71_000).single()
+        assertTrue(done.finished)
+        assertEquals(60_000L, done.ranMs)
+        assertEquals(1, done.steps)
+        val after = m.view(70_000 + AgentModel.FINISHED_MS + 1).single()
+        assertEquals(SessionState.Idle, after.state)
+        assertEquals(false, after.finished)
+    }
+
+    @Test
+    fun a_stop_with_nothing_done_is_not_a_celebration() {
+        val m = AgentModel()
+        m.apply(RemoteMsg.Event("Stop", "s1", "coucou", "", "", ""), 1_000)
+        assertEquals(false, m.view(1_100).single().finished)
+    }
+
+    @Test
+    fun done_is_told_with_how_long_it_took() {
+        assertEquals("Done 2 min 14 s", AgentActivity.finished(134_000).line)
+        assertEquals("Done", AgentActivity.finished(300).line)
+        assertEquals(ActivityKind.Finished, AgentActivity.finished(0).kind)
+    }
+
+    @Test
+    fun a_subagent_stopping_does_not_end_the_session() {
+        val m = AgentModel()
+        m.apply(RemoteMsg.Event("UserPromptSubmit", "s1", "coucou", "", "", ""), 1_000)
+        m.apply(RemoteMsg.Event("SubagentStop", "s1", "coucou", "", "", ""), 2_000)
+        assertEquals(SessionState.Working, m.view(2_100).single().state)
+    }
+
     @Test
     fun a_run_counts_its_steps_and_keeps_its_start() {
         val m = AgentModel()

@@ -209,8 +209,11 @@ object IslandAgents {
         val busy = ui.sessions.filter { it.state != SessionState.Idle }
         val asked = ui.pending.map { it.session }.toSet()
         val needing = busy.filter { it.state == SessionState.NeedsYou && it.session !in asked }
-        if (ui.status == AgentUi.Status.Connected && busy.isNotEmpty() && ui.pending.isEmpty()) {
-            val s = needing.firstOrNull() ?: busy.first()
+        // A run that has just ended is told as done for a few seconds (the model clears the flag by itself).
+        val justDone = ui.sessions.filter { it.state == SessionState.Idle && it.finished }
+        if (ui.status == AgentUi.Status.Connected && (busy.isNotEmpty() || justDone.isNotEmpty()) && ui.pending.isEmpty()) {
+            val s = needing.firstOrNull() ?: busy.firstOrNull() ?: justDone.first()
+            val isDone = busy.isEmpty()
             val attention = needing.isNotEmpty()
             // Starting to ask: post it as new, so it opens by itself (an update would only change the card).
             if (attention && !attentionShown) repo.removeNotification(KEY_AGENT)
@@ -225,13 +228,19 @@ object IslandAgents {
                     // collapsed pill can wear the matching face and colour.
                     text = com.agupta07505.smartisland.coucou.ui.activityLine(
                         context,
-                        com.agupta07505.smartisland.coucou.agents.AgentActivity.of(s.tool, s.detail, s.state),
+                        if (isDone) {
+                            com.agupta07505.smartisland.coucou.agents.AgentActivity.finished(s.ranMs)
+                        } else {
+                            com.agupta07505.smartisland.coucou.agents.AgentActivity.of(s.tool, s.detail, s.state)
+                        },
                     ),
                     timeMillis = s.updatedAt,
                     mode = IslandMode.Agent,
                     category = if (attention) AGENT_NEEDS_YOU
-                    else com.agupta07505.smartisland.coucou.ui.ACTIVITY_CATEGORY_PREFIX +
-                        com.agupta07505.smartisland.coucou.agents.AgentActivity.of(s.tool, s.detail, s.state).kind.name,
+                    else com.agupta07505.smartisland.coucou.ui.ACTIVITY_CATEGORY_PREFIX + (
+                        if (isDone) com.agupta07505.smartisland.coucou.agents.ActivityKind.Finished.name
+                        else com.agupta07505.smartisland.coucou.agents.AgentActivity.of(s.tool, s.detail, s.state).kind.name
+                    ),
                 ),
                 // Opens by itself only when it starts asking for the person, not on every beat.
                 autoExpand = attention && !attentionShown,

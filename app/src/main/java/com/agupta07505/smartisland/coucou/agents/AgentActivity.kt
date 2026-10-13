@@ -9,7 +9,7 @@
 package com.agupta07505.smartisland.coucou.agents
 
 /** The family of thing it is busy with: drives the colour, Mochi's face and the verb. */
-enum class ActivityKind { Thinking, Reading, Editing, Searching, Browsing, Running, Delegating, Planning, Using, Asking, Waiting, Idle }
+enum class ActivityKind { Thinking, Reading, Editing, Searching, Browsing, Running, Delegating, Planning, Using, Asking, Waiting, Idle, Finished }
 
 data class Activity(val kind: ActivityKind, val verb: String, val subject: String) {
     /** "Editing Mochi.kt", or just "Thinking" when there is no subject. */
@@ -48,6 +48,10 @@ object AgentActivity {
             else -> Activity(ActivityKind.Using, "Using", tool)
         }
     }
+
+    /** A run that has just ended: "Done 2 min 14 s" (the verb is told in the person's language by the UI). */
+    fun finished(ranMs: Long): Activity =
+        Activity(ActivityKind.Finished, "Done", if (ranMs >= 1000) elapsed(ranMs) else "")
 
     /** The last segment of a path ("/a/b/Mochi.kt" -> "Mochi.kt"); anything that is not a path is cleaned as text. */
     fun fileName(detail: String): String {

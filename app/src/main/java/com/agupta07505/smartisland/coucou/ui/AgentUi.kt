@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.QuestionMark
 import androidx.compose.material3.Icon
@@ -87,6 +88,7 @@ fun activityLine(context: android.content.Context, a: com.agupta07505.smartislan
         "Planning" -> R.string.coucou_act_planning
         "Using" -> R.string.coucou_act_using
         "Needs you" -> R.string.coucou_act_needs_you
+        "Done" -> R.string.coucou_act_done
         "Idle" -> R.string.coucou_act_idle
         else -> null
     }
@@ -110,7 +112,10 @@ private val DotBlue = Color(0xFF4F9BFF)
 private val DotIndigo = Color(0xFF6365F2)
 private val DotViolet = Color(0xFF8B5CF6)
 
+private val DoneGreen = Color(0xFF4ADE80)
+
 private fun colorOf(kind: ActivityKind?): Color = when (kind) {
+    ActivityKind.Finished -> DoneGreen
     ActivityKind.Thinking -> DotViolet
     ActivityKind.Searching, ActivityKind.Browsing -> DotIndigo
     ActivityKind.Asking, ActivityKind.Waiting -> ReminderAmber
@@ -119,6 +124,7 @@ private fun colorOf(kind: ActivityKind?): Color = when (kind) {
 }
 
 private fun moodOf(kind: ActivityKind?): MochiMood = when (kind) {
+    ActivityKind.Finished -> MochiMood.Happy
     ActivityKind.Thinking -> MochiMood.Thinking
     ActivityKind.Searching, ActivityKind.Browsing -> MochiMood.Searching
     ActivityKind.Asking -> MochiMood.Alert
@@ -155,7 +161,12 @@ fun AgentCollapsedRight(notification: IslandNotification?) {
             Icon(Icons.Rounded.QuestionMark, "Question", tint = QuestionBlue, modifier = Modifier.size(16.dp))
         // Only the dots, in the colour of what it is doing: they sit at the right edge, clear of the
         // camera, which is exactly where a word would have gone under it. The sentence is on the open card.
-        else -> WorkingDots(colorOf(kindOf(notification)))
+        // Finished: a tick instead, for the moment it lasts.
+        else -> if (kindOf(notification) == ActivityKind.Finished) {
+            Icon(Icons.Rounded.Check, stringResource(R.string.coucou_act_done), tint = DoneGreen, modifier = Modifier.size(16.dp))
+        } else {
+            WorkingDots(colorOf(kindOf(notification)))
+        }
     }
 }
 
@@ -220,10 +231,14 @@ fun AgentExpanded(bottomPadding: Dp) {
         Spacer(Modifier.size(6.dp))
         if (rows.isEmpty()) Text(stringResource(R.string.coucou_agent_nothing), color = Color.White.copy(alpha = 0.62f), fontSize = 13.sp)
         for (s in rows) {
-            val act = AgentActivity.of(s.tool, s.detail, s.state)
+            val act = if (s.state == SessionState.Idle && s.finished) {
+                AgentActivity.finished(s.ranMs)
+            } else {
+                AgentActivity.of(s.tool, s.detail, s.state)
+            }
             val color = colorOf(act.kind)
             Row(verticalAlignment = Alignment.Top, modifier = Modifier.padding(vertical = 3.dp)) {
-                Box(Modifier.padding(top = 5.dp).size(7.dp).clip(CircleShape).background(if (s.state == SessionState.Idle) Color.White.copy(alpha = 0.3f) else color))
+                Box(Modifier.padding(top = 5.dp).size(7.dp).clip(CircleShape).background(if (s.state == SessionState.Idle && !s.finished) Color.White.copy(alpha = 0.3f) else color))
                 Spacer(Modifier.width(8.dp))
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -245,7 +260,7 @@ fun AgentExpanded(bottomPadding: Dp) {
                     }
                     Text(
                         activityLine(context, act),
-                        color = if (s.state == SessionState.Idle) Color.White.copy(alpha = 0.62f) else color,
+                        color = if (s.state == SessionState.Idle && !s.finished) Color.White.copy(alpha = 0.62f) else color,
                         fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                 }

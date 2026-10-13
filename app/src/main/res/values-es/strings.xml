@@ -48,6 +48,7 @@
     <string name="coucou_act_planning">Planeando</string>
     <string name="coucou_act_using">Usando</string>
     <string name="coucou_act_needs_you">Te necesita</string>
+    <string name="coucou_act_done">Terminó</string>
     <string name="coucou_act_idle">En reposo</string>
     <string name="coucou_phrase_clear_1">Todo despejado ✨</string>
     <string name="coucou_phrase_clear_2">Nada pendiente, qué paz</string>

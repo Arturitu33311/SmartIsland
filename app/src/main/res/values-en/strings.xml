@@ -655,6 +655,7 @@
     <string name="coucou_act_planning">Planning</string>
     <string name="coucou_act_using">Using</string>
     <string name="coucou_act_needs_you">Needs you</string>
+    <string name="coucou_act_done">Done</string>
     <string name="coucou_act_idle">Idle</string>
     <string name="coucou_phrase_clear_1">All clear ✨</string>
     <string name="coucou_phrase_clear_2">Nothing pending, how peaceful</string>

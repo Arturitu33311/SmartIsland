@@ -40,6 +40,10 @@ data class SessionInfo(
     val since: Long = updatedAt,
     /** How many tools this run has started: a sense of how far along it is. */
     val steps: Int = 0,
+    /** This is a run that just ended well (a Stop after work): shown as done for a few seconds. */
+    val finished: Boolean = false,
+    /** How long that run lasted, for "Done · 2 min 14 s". */
+    val ranMs: Long = 0,
 )
 
 /** What the laptop's Coucou says (see remote.rs). */
@@ -175,6 +179,9 @@ class AgentModel {
 
         /** Slack after a request's own time limit before the phone drops it (the laptop's clock rules). */
         const val PENDING_GRACE_S = 20
+
+        /** How long a run that ended is shown as done before it is just idle. */
+        const val FINISHED_MS = 7_000L
     }
 
     fun apply(msg: RemoteMsg, now: Long) {
@@ -188,20 +195,19 @@ class AgentModel {
             is RemoteMsg.Event -> event(msg, now)
             else -> Unit
         }
-        // A request still waiting means that session needs the human.
-        for (p in pending.values) {
-            val s = sessions[p.session]
-            sessions[p.session] = (s ?: SessionInfo(p.session, p.project, SessionState.NeedsYou, p.tool, p.detail, now))
-                .copy(
-                    state = SessionState.NeedsYou, tool = p.tool, detail = p.detail, updatedAt = now,
-                    since = if (s?.state == SessionState.NeedsYou) s.since else now,
-                )
-        }
+        // (A request still waiting makes its session "needs you" in [view], without being written into the
+        // session: a request answered at the terminal never says so, and must not outlive the run.)
     }
 
     private fun event(e: RemoteMsg.Event, now: Long) {
         if (e.session.isEmpty()) return
         if (e.event == "PostToolUseFailure") lastFailureAt = now
+        // What a session says next proves its earlier request is over: the tool ran (or failed), the turn
+        // ended, the session ended, or a new prompt came. Without this a request answered at the terminal
+        // kept the session at "needs you" until its own time limit and a quarter hour more.
+        val endsRequests = e.event == "Stop" || e.event == "SessionEnd" || e.event == "UserPromptSubmit"
+        val toolRan = (e.event == "PostToolUse" || e.event == "PostToolUseFailure") && e.tool.isNotEmpty()
+        pending.entries.removeAll { (_, p) -> p.session == e.session && (endsRequests || (toolRan && p.tool == e.tool)) }
         val old = sessions[e.session]
         val project = e.project.ifEmpty { old?.project ?: "" }
         when (e.event) {
@@ -209,7 +215,16 @@ class AgentModel {
             // A subagent finishing is not the session finishing: it goes on until its own Stop.
             "SubagentStop" ->
                 sessions[e.session] = (old ?: SessionInfo(e.session, project, SessionState.Idle, "", "", now)).copy(updatedAt = now)
-            "Stop", "SessionStart" ->
+            // The turn ended: after work (or after asking) it is "done" for a moment, then idle.
+            "Stop" -> {
+                val didWork = old != null && old.state != SessionState.Idle
+                sessions[e.session] = SessionInfo(
+                    e.session, project, SessionState.Idle, old?.tool ?: "", old?.detail ?: "", now,
+                    since = now, steps = old?.steps ?: 0,
+                    finished = didWork, ranMs = if (didWork) now - old!!.since else 0L,
+                )
+            }
+            "SessionStart" ->
                 sessions[e.session] = SessionInfo(e.session, project, SessionState.Idle, old?.tool ?: "", old?.detail ?: "", now)
             // Claude Code says "waiting for your input" when it has been idle a while: that is not
             // asking for anything. A permission it cannot raise as a request (a background job's)
@@ -247,8 +262,22 @@ class AgentModel {
         // the "resolved" line was lost with the link.
         pending.entries.removeAll { now - it.value.receivedAt > (it.value.timeoutS + PENDING_GRACE_S) * 1000L }
         val asked = pending.values.map { it.session }.toSet()
-        val shown = sessions.values.map {
+        // A session with a request waiting is "needs you" whatever it last said; one that exists only
+        // because of a request (its events never reached us) is made up from the request.
+        val byRequest = pending.values.groupBy { it.session }.mapValues { (_, ps) -> ps.minBy { it.receivedAt } }
+        val withRequests = LinkedHashMap(sessions)
+        for ((sid, p) in byRequest) {
+            val s = sessions[sid]
+            withRequests[sid] = (s ?: SessionInfo(sid, p.project, SessionState.NeedsYou, p.tool, p.detail, p.receivedAt))
+                .copy(
+                    state = SessionState.NeedsYou, tool = p.tool, detail = p.detail, updatedAt = p.receivedAt,
+                    since = if (s?.state == SessionState.NeedsYou) s.since else p.receivedAt,
+                )
+        }
+        val shown = withRequests.values.map {
             when {
+                // "Done" is a moment, not a state: after it the session is simply idle.
+                it.finished && now - it.since > FINISHED_MS -> it.copy(finished = false)
                 it.state == SessionState.Working && now - it.updatedAt > STALE_MS -> it.copy(state = SessionState.Idle)
                 // A "needs you" nothing backs: the terminal answered it, or the person left. It fades.
                 it.state == SessionState.NeedsYou && it.session !in asked && now - it.updatedAt > ATTENTION_MS ->
@@ -259,7 +288,7 @@ class AgentModel {
         // Whatever has been quiet long enough is forgotten (judged after fading, so a stale "needs you" goes too).
         sessions.entries.removeAll { e -> shown.any { it.session == e.key && it.state != SessionState.NeedsYou && now - it.updatedAt > FORGET_MS } }
         return shown
-            .filter { it.session in sessions }
+            .filter { it.session in sessions || it.session in byRequest }
             .sortedWith(compareBy({ it.state.ordinal.let { o -> if (it.state == SessionState.NeedsYou) -1 else o } }, { -it.updatedAt }))
     }
 
