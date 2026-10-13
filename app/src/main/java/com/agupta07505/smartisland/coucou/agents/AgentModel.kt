@@ -36,6 +36,10 @@ data class SessionInfo(
     val tool: String,
     val detail: String,
     val updatedAt: Long,
+    /** When this state began: for a run, its first moment (tools do not restart it). */
+    val since: Long = updatedAt,
+    /** How many tools this run has started: a sense of how far along it is. */
+    val steps: Int = 0,
 )
 
 /** What the laptop's Coucou says (see remote.rs). */
@@ -188,7 +192,10 @@ class AgentModel {
         for (p in pending.values) {
             val s = sessions[p.session]
             sessions[p.session] = (s ?: SessionInfo(p.session, p.project, SessionState.NeedsYou, p.tool, p.detail, now))
-                .copy(state = SessionState.NeedsYou, tool = p.tool, detail = p.detail, updatedAt = now)
+                .copy(
+                    state = SessionState.NeedsYou, tool = p.tool, detail = p.detail, updatedAt = now,
+                    since = if (s?.state == SessionState.NeedsYou) s.since else now,
+                )
         }
     }
 
@@ -199,7 +206,10 @@ class AgentModel {
         val project = e.project.ifEmpty { old?.project ?: "" }
         when (e.event) {
             "SessionEnd" -> sessions.remove(e.session)
-            "Stop", "SubagentStop", "SessionStart" ->
+            // A subagent finishing is not the session finishing: it goes on until its own Stop.
+            "SubagentStop" ->
+                sessions[e.session] = (old ?: SessionInfo(e.session, project, SessionState.Idle, "", "", now)).copy(updatedAt = now)
+            "Stop", "SessionStart" ->
                 sessions[e.session] = SessionInfo(e.session, project, SessionState.Idle, old?.tool ?: "", old?.detail ?: "", now)
             // Claude Code says "waiting for your input" when it has been idle a while: that is not
             // asking for anything. A permission it cannot raise as a request (a background job's)
@@ -217,11 +227,16 @@ class AgentModel {
             // A new prompt: it is thinking until its first tool (no tool, no detail), as on the laptop.
             "UserPromptSubmit" ->
                 sessions[e.session] = SessionInfo(e.session, project, SessionState.Working, "", "", now)
-            "PreToolUse", "PostToolUse", "PostToolUseFailure", "SubagentStart" ->
+            "PreToolUse", "PostToolUse", "PostToolUseFailure", "SubagentStart" -> {
+                val running = old?.state == SessionState.Working
+                val started = e.event == "PreToolUse" || e.event == "SubagentStart"
                 sessions[e.session] = SessionInfo(
                     e.session, project, SessionState.Working,
                     e.tool.ifEmpty { old?.tool ?: "" }, if (e.tool.isNotEmpty()) e.detail else (old?.detail ?: ""), now,
+                    since = if (running) old!!.since else now,
+                    steps = (if (running) old!!.steps else 0) + (if (started) 1 else 0),
                 )
+            }
             else -> sessions[e.session] = (old ?: SessionInfo(e.session, project, SessionState.Idle, "", "", now)).copy(updatedAt = now)
         }
     }

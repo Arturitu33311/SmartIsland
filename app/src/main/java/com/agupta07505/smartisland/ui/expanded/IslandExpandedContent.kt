@@ -178,7 +178,7 @@ fun IslandExpandedContent(
                 IslandMode.Stopwatch -> height.coerceIn(72.dp, 130.dp)
                 IslandMode.Reminder -> height.coerceIn(105.dp, 150.dp)
                 IslandMode.Desk -> height.coerceIn(150.dp, 460.dp)
-                IslandMode.Agent -> height.coerceIn(100.dp, 160.dp)
+                IslandMode.Agent -> height.coerceIn(100.dp, 200.dp)
                 IslandMode.JinxMsg -> height.coerceIn(120.dp, 200.dp)
                 IslandMode.Approval -> height.coerceIn(150.dp, 210.dp)
                 IslandMode.Question -> height.coerceIn(150.dp, 280.dp)

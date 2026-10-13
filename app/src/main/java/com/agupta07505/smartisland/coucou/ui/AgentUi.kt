@@ -4,6 +4,7 @@
 
 package com.agupta07505.smartisland.coucou.ui
 
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -35,6 +36,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -51,12 +53,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.agupta07505.smartisland.coucou.CoucouRuntime
 import com.agupta07505.smartisland.coucou.IslandAgents
+import com.agupta07505.smartisland.coucou.agents.ActivityKind
+import com.agupta07505.smartisland.coucou.agents.AgentActivity
 import com.agupta07505.smartisland.coucou.agents.ConfirmActivity
 import com.agupta07505.smartisland.coucou.agents.Pending
 import com.agupta07505.smartisland.coucou.agents.RemoteProtocol
 import com.agupta07505.smartisland.coucou.touchIsland
 import com.agupta07505.smartisland.coucou.agents.SessionState
 import com.agupta07505.smartisland.model.IslandNotification
+import kotlinx.coroutines.delay
 
 /** Claude Code's colour, as on the PC. */
 val ClaudeOrange = Color(0xFFD97757)
@@ -64,18 +69,72 @@ val QuestionBlue = Color(0xFF60A5FA)
 private val Green = Color(0xFF4ADE80)
 private val Red = Color(0xFFF4505E)
 
-/** Left of the collapsed island: Mochi, in Claude's colour. */
+/** What the island card says Claude Code is doing: the kind rides in the notification's category. */
+const val ACTIVITY_CATEGORY_PREFIX = "activity:"
+
+private fun kindOf(notification: IslandNotification?): ActivityKind? {
+    val c = notification?.category ?: return null
+    if (c == com.agupta07505.smartisland.model.AGENT_NEEDS_YOU) return ActivityKind.Asking
+    if (!c.startsWith(ACTIVITY_CATEGORY_PREFIX)) return null
+    val name = c.removePrefix(ACTIVITY_CATEGORY_PREFIX)
+    return ActivityKind.entries.firstOrNull { it.name == name }
+}
+
+/** The colours of the laptop's Mochi dots: working blue, searching indigo, thinking violet. */
+private val DotBlue = Color(0xFF4F9BFF)
+private val DotIndigo = Color(0xFF6365F2)
+private val DotViolet = Color(0xFF8B5CF6)
+
+private fun colorOf(kind: ActivityKind?): Color = when (kind) {
+    ActivityKind.Thinking -> DotViolet
+    ActivityKind.Searching, ActivityKind.Browsing -> DotIndigo
+    ActivityKind.Asking, ActivityKind.Waiting -> ReminderAmber
+    null, ActivityKind.Idle -> ClaudeOrange
+    else -> DotBlue
+}
+
+private fun moodOf(kind: ActivityKind?): MochiMood = when (kind) {
+    ActivityKind.Thinking -> MochiMood.Thinking
+    ActivityKind.Searching, ActivityKind.Browsing -> MochiMood.Searching
+    ActivityKind.Asking -> MochiMood.Alert
+    null, ActivityKind.Idle, ActivityKind.Waiting -> MochiMood.Listening
+    else -> MochiMood.Working
+}
+
+private fun shortVerb(kind: ActivityKind?): String = when (kind) {
+    ActivityKind.Thinking -> "Thinking"
+    ActivityKind.Reading -> "Reading"
+    ActivityKind.Editing -> "Editing"
+    ActivityKind.Searching -> "Searching"
+    ActivityKind.Browsing -> "Browsing"
+    ActivityKind.Running -> "Running"
+    ActivityKind.Delegating -> "Delegating"
+    ActivityKind.Planning -> "Planning"
+    ActivityKind.Using -> "Using"
+    ActivityKind.Asking -> "Needs you"
+    else -> ""
+}
+
+/** Left of the collapsed island: Mochi in Claude's colour, with the face of what it is doing. */
 @Composable
 fun AgentCollapsedGlyph(notification: IslandNotification?) {
-    val mode = notification?.mode
-    when (mode) {
-        com.agupta07505.smartisland.model.IslandMode.Approval -> MochiGlyph(24.dp, ReminderAmber, MochiMood.Alert)
-        com.agupta07505.smartisland.model.IslandMode.Question -> MochiGlyph(24.dp, QuestionBlue, MochiMood.Alert)
-        else -> MochiGlyph(24.dp, ClaudeOrange, MochiMood.Listening)
+    when (notification?.mode) {
+        com.agupta07505.smartisland.model.IslandMode.Approval ->
+            MochiGlyph(24.dp, ReminderAmber, MochiMood.Alert, outfit = rememberMochiOutfit(MochiMood.Alert))
+        com.agupta07505.smartisland.model.IslandMode.Question ->
+            MochiGlyph(24.dp, QuestionBlue, MochiMood.Alert, outfit = rememberMochiOutfit(MochiMood.Alert))
+        else -> {
+            val kind = kindOf(notification)
+            val mood = moodOf(kind)
+            MochiGlyph(24.dp, ClaudeOrange, mood, outfit = rememberMochiOutfit(mood))
+        }
     }
 }
 
-/** Right of the collapsed island: three dots that take turns while it works, a lock or a question mark when it asks. */
+/**
+ * Right of the collapsed island: a lock or a question mark when it asks; otherwise the verb of what it is
+ * doing (Reading, Editing, Running…) and three dots in that kind's colour taking turns.
+ */
 @Composable
 fun AgentCollapsedRight(notification: IslandNotification?) {
     when (notification?.mode) {
@@ -83,7 +142,19 @@ fun AgentCollapsedRight(notification: IslandNotification?) {
             Icon(Icons.Rounded.Lock, "Permission", tint = ReminderAmber, modifier = Modifier.size(15.dp))
         com.agupta07505.smartisland.model.IslandMode.Question ->
             Icon(Icons.Rounded.QuestionMark, "Question", tint = QuestionBlue, modifier = Modifier.size(16.dp))
-        else -> WorkingDots(ClaudeOrange)
+        else -> {
+            val kind = kindOf(notification)
+            val color = colorOf(kind)
+            val verb = shortVerb(kind)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                if (verb.isNotEmpty()) {
+                    Crossfade(targetState = verb, label = "agent-verb") { v ->
+                        Text(v, color = color, fontSize = 10.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                    }
+                }
+                WorkingDots(color)
+            }
+        }
     }
 }
 
@@ -110,38 +181,73 @@ private fun WorkingDots(color: Color) {
     }
 }
 
-/** The open island while Claude Code works: each session, what it is doing, and whether it needs you. */
+/**
+ * The open island while Claude Code works. One line per session: its project and how long it has been at
+ * it on top, what it is doing right now (Editing Mochi.kt, Running cargo test…) under, in the colour of
+ * that kind of work. A session that needs the person says so first.
+ */
 @Composable
 fun AgentExpanded(bottomPadding: Dp) {
     val ui by CoucouRuntime.agentUi.collectAsState()
+    // One tick a second while the card is open, so the times move; closed, nothing runs.
+    val now by produceState(System.currentTimeMillis()) {
+        while (true) {
+            value = System.currentTimeMillis()
+            delay(1_000)
+        }
+    }
+    val shown = ui.sessions.filter { it.state != SessionState.Idle }.ifEmpty { ui.sessions }
+    val rows = shown.take(3)
+    val head = rows.firstOrNull()?.let { AgentActivity.of(it.tool, it.detail, it.state).kind }
     Column(
         Modifier.fillMaxSize().padding(horizontal = 18.dp).padding(top = 6.dp, bottom = bottomPadding),
         verticalArrangement = Arrangement.Center,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            MochiGlyph(30.dp, ClaudeOrange, MochiMood.Listening)
+            MochiGlyph(30.dp, ClaudeOrange, moodOf(head), outfit = rememberMochiOutfit(moodOf(head)))
             Spacer(Modifier.width(10.dp))
-            Text("Claude Code", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text("Claude Code", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            val working = shown.count { it.state == SessionState.Working }
+            val asking = shown.count { it.state == SessionState.NeedsYou }
+            val summary = listOfNotNull(
+                if (working > 0) "$working working" else null,
+                if (asking > 0) "$asking asking" else null,
+            ).joinToString(" · ")
+            if (summary.isNotEmpty()) Text(summary, color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
         }
-        Spacer(Modifier.size(8.dp))
-        val sessions = ui.sessions.filter { it.state != SessionState.Idle }.ifEmpty { ui.sessions }.take(3)
-        if (sessions.isEmpty()) Text("Nothing running", color = Color.White.copy(alpha = 0.5f), fontSize = 13.sp)
-        for (s in sessions) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
-                val dot = when (s.state) {
-                    SessionState.Working -> ClaudeOrange
-                    SessionState.NeedsYou -> ReminderAmber
-                    SessionState.Idle -> Color.White.copy(alpha = 0.3f)
+        Spacer(Modifier.size(6.dp))
+        if (rows.isEmpty()) Text("Nothing running", color = Color.White.copy(alpha = 0.5f), fontSize = 13.sp)
+        for (s in rows) {
+            val act = AgentActivity.of(s.tool, s.detail, s.state)
+            val color = colorOf(act.kind)
+            Row(verticalAlignment = Alignment.Top, modifier = Modifier.padding(vertical = 3.dp)) {
+                Box(Modifier.padding(top = 5.dp).size(7.dp).clip(CircleShape).background(if (s.state == SessionState.Idle) Color.White.copy(alpha = 0.3f) else color))
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            s.project.ifEmpty { "session" }, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
+                        )
+                        if (s.state != SessionState.Idle) {
+                            Spacer(Modifier.width(8.dp))
+                            val meta = buildString {
+                                append(AgentActivity.elapsed(now - s.since))
+                                if (s.state == SessionState.Working && s.steps > 0) append(" · ${s.steps} step${if (s.steps == 1) "" else "s"}")
+                            }
+                            Text(meta, color = Color.White.copy(alpha = 0.4f), fontSize = 11.sp, maxLines = 1)
+                        }
+                    }
+                    Text(
+                        act.line,
+                        color = if (s.state == SessionState.Idle) Color.White.copy(alpha = 0.4f) else color,
+                        fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
                 }
-                Box(Modifier.size(7.dp).clip(CircleShape).background(dot))
-                Spacer(Modifier.width(8.dp))
-                Text(s.project.ifEmpty { "session" }, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    listOf(s.tool, s.detail).filter { it.isNotEmpty() }.joinToString(" · "),
-                    color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                )
             }
+        }
+        if (shown.size > rows.size) {
+            Text("+${shown.size - rows.size} more", color = Color.White.copy(alpha = 0.4f), fontSize = 11.sp, modifier = Modifier.padding(start = 15.dp, top = 2.dp))
         }
     }
 }

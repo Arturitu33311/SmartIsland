@@ -221,10 +221,14 @@ object IslandAgents {
                     packageName = context.packageName,
                     appName = "Claude Code",
                     title = (s.project.ifEmpty { "Claude Code" }) + if (busy.size > 1) "  +${busy.size - 1}" else "",
-                    text = listOf(s.tool, s.detail).filter { it.isNotEmpty() }.joinToString(" · ").ifEmpty { if (attention) "needs you" else "working" },
+                    // What it is doing, in words ("Editing Mochi.kt"); its kind rides in the category so the
+                    // collapsed pill can wear the matching face and colour.
+                    text = com.agupta07505.smartisland.coucou.agents.AgentActivity.of(s.tool, s.detail, s.state).line,
                     timeMillis = s.updatedAt,
                     mode = IslandMode.Agent,
-                    category = if (attention) AGENT_NEEDS_YOU else null,
+                    category = if (attention) AGENT_NEEDS_YOU
+                    else com.agupta07505.smartisland.coucou.ui.ACTIVITY_CATEGORY_PREFIX +
+                        com.agupta07505.smartisland.coucou.agents.AgentActivity.of(s.tool, s.detail, s.state).kind.name,
                 ),
                 // Opens by itself only when it starts asking for the person, not on every beat.
                 autoExpand = attention && !attentionShown,
