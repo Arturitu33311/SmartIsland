@@ -104,8 +104,12 @@ fun MochiGlyph(
     // The outfit goes on with a little overshoot, each time it changes.
     val enter = remember(outfit) { Animatable(0f) }
     LaunchedEffect(outfit) { if (outfit != Outfit.None) enter.animateTo(1f, tween(350)) }
-    val fit = if (outfit == Outfit.None) 1f else Wardrobe.fit(outfit)
     val simplifiedOutfit = size < 40.dp
+    val rawFit = if (outfit == Outfit.None) 1f else Wardrobe.fit(outfit)
+    // At island size the full shrink leaves a speck under the hat: shrink half as much and let him
+    // sit a little lower, so the hat still ends inside the pill.
+    val fit = if (simplifiedOutfit) 1f - (1f - rawFit) * 0.5f else rawFit
+    val drop = if (simplifiedOutfit) (1f - fit) * 0.14f else 0f
     val transition = rememberInfiniteTransition(label = "mochi")
     // Eyes open for ~3.6 s, shut for a blink of 0.15 s.
     val blink by transition.animateFloat(
@@ -231,7 +235,7 @@ fun MochiGlyph(
             .graphicsLayer {
                 rotationZ = tilt
                 translationX = shiftX * size.toPx()
-                translationY = hop * size.toPx()
+                translationY = (hop + drop) * size.toPx()
                 // (`fit` shrinks him with a big outfit on, so a witch's brim stays in his box.)
                 scaleX = scale * breathe * fit * gestureStretchX
                 scaleY = scale * (if (dancing) 2f - breathe else 1f) * fit * gestureStretchY

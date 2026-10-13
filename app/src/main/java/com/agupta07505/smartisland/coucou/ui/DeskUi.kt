@@ -4,6 +4,15 @@
 
 package com.agupta07505.smartisland.coucou.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,7 +23,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,7 +56,7 @@ object DeskState {
 @Suppress("UNUSED_PARAMETER")
 fun DeskCollapsedGlyph(notification: IslandNotification?) {
     val b = bubbleMood(lookDir = 0f)
-    LivelyMochi(24.dp, b.tint, b.mood, outfit = rememberMochiOutfit(b.mood))
+    LivelyMochi(24.dp, b.tint, b.mood, outfit = rememberMochiOutfit(b.mood), countdown = b.ring)
 }
 
 /** Right of the collapsed island: how many things are open. */
@@ -50,11 +64,49 @@ fun DeskCollapsedGlyph(notification: IslandNotification?) {
 fun DeskCollapsedRight(notification: IslandNotification?) {
     val n = notification?.progress ?: 0
     if (n > 0) {
-        Box(
-            Modifier.clip(RoundedCornerShape(50)).background((if (notification?.category == DeskState.OVERDUE) ReminderAmber else MochiEmerald).copy(alpha = 0.22f))
-                .padding(horizontal = 8.dp, vertical = 2.dp),
-        ) {
-            Text("$n", color = if (notification?.category == DeskState.OVERDUE) ReminderAmber else Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        val overdue = notification?.category == DeskState.OVERDUE
+        CountBadge(n, if (overdue) ReminderAmber else MochiEmerald, if (overdue) ReminderAmber else Color.White)
+    }
+}
+
+/**
+ * How many things are open. When the number changes (a task done, one added) it rolls to the new value
+ * and gives a small pulse: the island answers what was just done, instead of silently being different.
+ */
+@Composable
+fun CountBadge(n: Int, tint: Color, textColor: Color) {
+    val reduced = rememberReducedMotion()
+    val pulse = remember { Animatable(1f) }
+    var last by remember { mutableIntStateOf(n) }
+    LaunchedEffect(n) {
+        if (n != last) {
+            last = n
+            if (!reduced) {
+                pulse.snapTo(1.14f)
+                pulse.animateTo(1f, spring(dampingRatio = 0.55f, stiffness = 500f))
+            }
+        }
+    }
+    Box(
+        Modifier
+            .graphicsLayer { scaleX = pulse.value; scaleY = pulse.value }
+            .clip(RoundedCornerShape(50))
+            .background(tint.copy(alpha = 0.22f))
+            .padding(horizontal = 8.dp, vertical = 2.dp),
+    ) {
+        AnimatedContent(
+            targetState = n,
+            transitionSpec = {
+                if (reduced) {
+                    fadeIn(tween(0)) togetherWith fadeOut(tween(0))
+                } else {
+                    (slideInVertically(tween(180)) { it / 2 } + fadeIn(tween(180))) togetherWith
+                        (slideOutVertically(tween(140)) { -it / 2 } + fadeOut(tween(110)))
+                }
+            },
+            label = "count",
+        ) { v ->
+            Text("$v", color = textColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }
@@ -64,7 +116,7 @@ fun DeskCollapsedRight(notification: IslandNotification?) {
  * over everything (it only lasts 3 s), then something overdue, a tired battery, a hello, news
  * (pop first, stare after), music; at night he naps through calm tasks; emptiness naps by day.
  */
-private data class BubbleMood(val mood: MochiMood, val tint: Color, val open: Int)
+private data class BubbleMood(val mood: MochiMood, val tint: Color, val open: Int, val ring: Float = 0f)
 
 @Composable
 private fun bubbleMood(lookDir: Float): BubbleMood {
@@ -74,7 +126,9 @@ private fun bubbleMood(lookDir: Float): BubbleMood {
     val open = tasks.filter { !it.done }
     val overdue = open.any { it.remindAt != null && it.remindAt * 1000 <= now }
     val celebrating = rememberCelebration(open.size)
-    val calm = rememberCalmMood(open.mapNotNull { it.remindAt })
+    val remindAts = open.mapNotNull { it.remindAt }
+    val calm = rememberCalmMood(remindAts)
+    val ring = rememberSoonProgress(remindAts)
     val mood = when {
         celebrating -> MochiMood.Celebrating
         overdue -> MochiMood.Alert
@@ -90,7 +144,7 @@ private fun bubbleMood(lookDir: Float): BubbleMood {
         scene.musicPlaying -> MochiMood.Dancing
         else -> calm
     }
-    return BubbleMood(mood, if (overdue) ReminderAmber else MochiEmerald, open.size)
+    return BubbleMood(mood, if (overdue) ReminderAmber else MochiEmerald, open.size, ring)
 }
 
 /**
@@ -102,7 +156,7 @@ private fun bubbleMood(lookDir: Float): BubbleMood {
 @Composable
 fun MochiBubble(size: Dp = 22.dp, lookDir: Float = 0f) {
     val b = bubbleMood(lookDir)
-    LivelyMochi(size, b.tint, b.mood, lookX = lookDir, outfit = rememberMochiOutfit(b.mood))
+    LivelyMochi(size, b.tint, b.mood, lookX = lookDir, outfit = rememberMochiOutfit(b.mood), countdown = b.ring)
 }
 
 /** His bubble grown into a mini-pill (expanded island): him, with how many things are open. */
@@ -110,14 +164,9 @@ fun MochiBubble(size: Dp = 22.dp, lookDir: Float = 0f) {
 fun MochiBubblePill(lookDir: Float = 0f) {
     val b = bubbleMood(lookDir)
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        LivelyMochi(20.dp, b.tint, b.mood, lookX = lookDir, outfit = rememberMochiOutfit(b.mood))
+        LivelyMochi(20.dp, b.tint, b.mood, lookX = lookDir, outfit = rememberMochiOutfit(b.mood), countdown = b.ring)
         if (b.open > 0) {
-            Box(
-                Modifier.clip(RoundedCornerShape(50)).background(b.tint.copy(alpha = 0.22f))
-                    .padding(horizontal = 8.dp, vertical = 2.dp),
-            ) {
-                Text("${b.open}", color = if (b.mood == MochiMood.Alert) ReminderAmber else Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            }
+            CountBadge(b.open, b.tint, if (b.mood == MochiMood.Alert) ReminderAmber else Color.White)
         }
     }
 }

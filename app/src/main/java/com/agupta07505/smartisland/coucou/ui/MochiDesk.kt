@@ -5,6 +5,11 @@
 package com.agupta07505.smartisland.coucou.ui
 
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -30,6 +35,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -115,7 +121,9 @@ fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modif
     val overdue = open.count { it.remindAt != null && it.remindAt * 1000 < now }
     val scene = rememberMochiScene()
     val celebrating = rememberCelebration(open.size)
-    val calm = rememberCalmMood(open.mapNotNull { it.remindAt })
+    val remindAts = open.mapNotNull { it.remindAt }
+    val calm = rememberCalmMood(remindAts)
+    val ring = rememberSoonProgress(remindAts)
     // Same attention order as his bubble (no look direction here: the desk fills the island, so
     // the stare stays centered). Music is ambience: it only gets him dancing when nothing needs
     // him; at night he naps through calm tasks.
@@ -168,6 +176,7 @@ fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modif
             LivelyMochi(
                 size = 38.dp, tint = tint, mood = mood, outfit = rememberMochiOutfit(mood),
                 tickleSignal = tickles,
+                countdown = ring,
                 // (No clip: it would cut his hat and the confetti. No ripple either.)
                 modifier = Modifier.clickable(
                     interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
@@ -205,12 +214,19 @@ fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modif
             }
         }
 
-        for (t in open.take(4)) TaskRow(t) {
-            touchIsland(context)
-            Haptics.tap(context)
-            CoucouTasks.setDone(context, t.id, true)
-            smileUntil = System.currentTimeMillis() + 1600
-            now = System.currentTimeMillis()
+        for (t in open.take(4)) key(t.id) {
+            TaskRow(
+                t,
+                onCheck = {
+                    touchIsland(context)
+                    Haptics.tap(context)
+                },
+                onDone = {
+                    CoucouTasks.setDone(context, t.id, true)
+                    smileUntil = System.currentTimeMillis() + 1600
+                    now = System.currentTimeMillis()
+                },
+            )
         }
         if (!adding) {
             Row(
@@ -260,20 +276,51 @@ fun MochiDesk(onReplyStateChanged: (Boolean) -> Unit, modifier: Modifier = Modif
 private fun time(unixSec: Long): String = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(unixSec * 1000))
 
 @Composable
-private fun TaskRow(t: CoucouTask, onDone: () -> Unit) {
+private fun TaskRow(t: CoucouTask, onCheck: () -> Unit, onDone: () -> Unit) {
     val late = t.remindAt != null && t.remindAt * 1000 < System.currentTimeMillis()
-    Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = 0.05f)).padding(horizontal = 8.dp, vertical = 5.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    val reduced = rememberReducedMotion()
+    // Checked first (the circle fills with a tick), then the row folds away, then the task is really done:
+    // what you did is acknowledged, instead of the line vanishing.
+    var checked by remember(t.id) { mutableStateOf(false) }
+    var gone by remember(t.id) { mutableStateOf(false) }
+    LaunchedEffect(checked) {
+        if (checked) {
+            delay(if (reduced) 0L else 150L)
+            gone = true
+            delay(if (reduced) 0L else 200L)
+            onDone()
+        }
+    }
+    val fill by animateColorAsState(if (checked) Done else Color.Transparent, tween(120), label = "check-fill")
+    AnimatedVisibility(
+        visible = !gone,
+        exit = shrinkVertically(tween(if (reduced) 0 else 180)) + fadeOut(tween(if (reduced) 0 else 150)),
     ) {
-        Box(
-            Modifier.size(22.dp).clip(CircleShape).border(1.6.dp, if (late) ReminderAmber else Color.White.copy(alpha = 0.4f), CircleShape).clickable(onClick = onDone),
-        )
-        Spacer(Modifier.width(10.dp))
-        Text(t.title, color = Color.White, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        t.remindAt?.let {
-            Text("⏰ ${time(it)}", color = if (late) ReminderAmber else Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
-            Spacer(Modifier.width(4.dp))
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = 0.05f)).padding(horizontal = 8.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier.size(22.dp).clip(CircleShape).background(fill)
+                    .border(1.6.dp, if (checked) Done else if (late) ReminderAmber else Color.White.copy(alpha = 0.4f), CircleShape)
+                    .clickable(enabled = !checked) {
+                        onCheck()
+                        checked = true
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                if (checked) Icon(Icons.Rounded.Check, null, tint = Color(0xFF0B1F12), modifier = Modifier.size(14.dp))
+            }
+            Spacer(Modifier.width(10.dp))
+            Text(
+                t.title,
+                color = Color.White.copy(alpha = if (checked) 0.5f else 1f), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            t.remindAt?.let {
+                Text("⏰ ${time(it)}", color = if (late) ReminderAmber else Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
+                Spacer(Modifier.width(4.dp))
+            }
         }
     }
 }

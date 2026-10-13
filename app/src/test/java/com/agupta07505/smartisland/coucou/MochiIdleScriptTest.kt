@@ -127,6 +127,28 @@ class MochiIdleScriptTest {
     }
 
     @Test
+    fun gestures_rest_with_reduced_motion_and_with_the_screen_off() {
+        assertTrue(MochiIdleScript.gesturesAllowed(reducedMotion = false, screenOn = true))
+        assertFalse(MochiIdleScript.gesturesAllowed(reducedMotion = true, screenOn = true))
+        assertFalse(MochiIdleScript.gesturesAllowed(reducedMotion = false, screenOn = false))
+    }
+
+    @Test
+    fun the_ring_closes_as_the_reminder_comes_due() {
+        val now = 2_000_000_000_000L
+        fun at(sec: Long) = now / 1000 + sec
+        assertEquals(0f, MochiIdleScript.soonProgress(emptyList(), now), 0f)
+        assertEquals(0f, MochiIdleScript.soonProgress(listOf(at(16 * 60)), now), 0f)
+        assertEquals(0f, MochiIdleScript.soonProgress(listOf(at(-30)), now), 0f)
+        val early = MochiIdleScript.soonProgress(listOf(at(14 * 60)), now)
+        val late = MochiIdleScript.soonProgress(listOf(at(2 * 60)), now)
+        assertTrue(early > 0f && late > early)
+        assertEquals(1f, MochiIdleScript.soonProgress(listOf(at(0)), now), 0.001f)
+        // The nearest one rules.
+        assertEquals(late, MochiIdleScript.soonProgress(listOf(at(10 * 60), at(2 * 60)), now), 0.001f)
+    }
+
+    @Test
     fun desk_status_counts_what_is_open() {
         assertEquals("All clear", MochiIdleScript.deskStatus(0, 0))
         assertEquals("3 to do", MochiIdleScript.deskStatus(3, 0))

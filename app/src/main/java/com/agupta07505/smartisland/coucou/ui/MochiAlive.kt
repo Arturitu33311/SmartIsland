@@ -3,7 +3,7 @@
  *
  * Mochi with a life of his own: the Compose side of [MochiIdleScript]. [rememberCalmMood] decides
  * awake or asleep (night, or 20 quiet minutes) and [LivelyMochi] plays his little gestures, the
- * thought bubble and the charging bolt around a plain [MochiGlyph].
+ * thought bubble, the charging bolt and the countdown ring around a plain [MochiGlyph].
  */
 
 package com.agupta07505.smartisland.coucou.ui
@@ -12,19 +12,36 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.database.ContentObserver
 import android.os.BatteryManager
+import android.os.Handler
+import android.os.Looper
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -34,13 +51,41 @@ import kotlinx.coroutines.isActive
 import java.util.Calendar
 import kotlin.random.Random
 
+/** Whether the person has turned system animations off ("Remove animations"): his little gestures stop too. */
+@Composable
+fun rememberReducedMotion(): Boolean {
+    val app = LocalContext.current.applicationContext
+    fun read() = Settings.Global.getFloat(app.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
+    var reduced by remember { mutableStateOf(read()) }
+    DisposableEffect(app) {
+        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) {
+                reduced = read()
+            }
+        }
+        runCatching {
+            app.contentResolver.registerContentObserver(
+                Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE), false, observer,
+            )
+        }
+        onDispose { runCatching { app.contentResolver.unregisterContentObserver(observer) } }
+    }
+    return reduced
+}
+
+private fun screenOn(context: Context): Boolean =
+    (context.getSystemService(Context.POWER_SERVICE) as? PowerManager)?.isInteractive != false
+
 /**
  * What he is when nothing else decides it. Re-evaluated on a slow clock while awake (the 20 minutes
- * and the "due soon" window drift with time) and quickly while asleep, so a touch wakes him at once.
+ * and the "due soon" window drift with time), quickly while asleep so a touch wakes him at once, and
+ * hardly at all while the screen is off: the screen coming on (an unlock) re-evaluates immediately.
  * [remindAts] are the open tasks' reminder times in unix seconds.
  */
 @Composable
 fun rememberCalmMood(remindAts: List<Long>): MochiMood {
+    val app = LocalContext.current.applicationContext
+    val unlockMs = rememberUnlockMs()
     fun compute(): MochiMood {
         val now = System.currentTimeMillis()
         return MochiIdleScript.calmMood(
@@ -50,13 +95,33 @@ fun rememberCalmMood(remindAts: List<Long>): MochiMood {
         )
     }
     var calm by remember { mutableStateOf(compute()) }
-    LaunchedEffect(remindAts) {
+    LaunchedEffect(remindAts, unlockMs) {
         while (isActive) {
             calm = compute()
-            delay(if (calm == MochiMood.Sleepy) 2_000L else 20_000L)
+            delay(
+                when {
+                    !screenOn(app) -> 60_000L
+                    calm == MochiMood.Sleepy -> 2_000L
+                    else -> 20_000L
+                },
+            )
         }
     }
     return calm
+}
+
+/** How far into the 15 minutes before the next reminder it is (0: none close); the ring around Mochi. */
+@Composable
+fun rememberSoonProgress(remindAts: List<Long>): Float {
+    val app = LocalContext.current.applicationContext
+    var progress by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(remindAts) {
+        while (isActive) {
+            progress = MochiIdleScript.soonProgress(remindAts, System.currentTimeMillis())
+            delay(if (!screenOn(app)) 60_000L else if (progress > 0f) 10_000L else 30_000L)
+        }
+    }
+    return progress
 }
 
 /** Plugged in, watched live (sticky battery state for the start, plug events after). */
@@ -98,8 +163,9 @@ fun rememberCharging(): Boolean {
 /**
  * [MochiGlyph] that does things by himself while [mood] is [MochiMood.Idle]: a gesture every
  * 6–15 s (yawn, stretch, looking up or around, a hop, a whistle, a scratch, a wink, a thought bubble),
- * a stretch when he wakes, a bolt while charging. [tickleSignal] bumps → he giggles.
- * Every other mood is drawn exactly as before.
+ * a stretch when he wakes, a bolt while charging. [tickleSignal] bumps → he giggles. [countdown] (0..1)
+ * draws a ring that closes as a reminder comes due. Gestures rest while the screen is off and while
+ * the system's animations are off; every other mood is drawn exactly as before.
  */
 @Composable
 fun LivelyMochi(
@@ -110,11 +176,14 @@ fun LivelyMochi(
     lookX: Float = 0f,
     outfit: Outfit = Outfit.None,
     tickleSignal: Int = 0,
+    countdown: Float = 0f,
 ) {
+    val app = LocalContext.current.applicationContext
     var gesture by remember { mutableStateOf(IdleGesture.None) }
     var thought by remember { mutableStateOf("💭") }
     val progress = remember { Animatable(0f) }
     val charging = rememberCharging()
+    val reduced by rememberUpdatedState(rememberReducedMotion())
     var lastMood by remember { mutableStateOf(mood) }
     var lastTickle by remember { mutableStateOf(tickleSignal) }
 
@@ -135,16 +204,19 @@ fun LivelyMochi(
             gesture = IdleGesture.None
         }
         var prev = IdleGesture.None
-        if (tickled) {
-            prev = IdleGesture.Tickle
-            play(IdleGesture.Tickle)
-        } else if (woke) {
-            // Waking up: a proper stretch before anything else.
-            prev = IdleGesture.Stretch
-            play(IdleGesture.Stretch)
+        if (MochiIdleScript.gesturesAllowed(reduced, screenOn(app))) {
+            if (tickled) {
+                prev = IdleGesture.Tickle
+                play(IdleGesture.Tickle)
+            } else if (woke) {
+                // Waking up: a proper stretch before anything else.
+                prev = IdleGesture.Stretch
+                play(IdleGesture.Stretch)
+            }
         }
         while (isActive) {
             delay(MochiIdleScript.gapMs(rnd))
+            if (!MochiIdleScript.gesturesAllowed(reduced, screenOn(app))) continue
             val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
             val g = MochiIdleScript.next(prev, hour, allowThought = true, rnd = rnd)
             if (g == IdleGesture.Think) thought = MochiIdleScript.thoughtFor(hour, rnd)
@@ -153,16 +225,32 @@ fun LivelyMochi(
         }
     }
 
-    MochiGlyph(
-        size = size,
-        tint = tint,
-        mood = mood,
-        modifier = modifier,
-        lookX = lookX,
-        outfit = outfit,
-        gesture = gesture,
-        gestureProgress = progress.value,
-        charging = charging,
-        thought = thought,
-    )
+    val ring by animateFloatAsState(countdown, tween(600), label = "countdownRing")
+    val inner by animateDpAsState(if (countdown > 0f) size * 0.82f else size, tween(300), label = "countdownSize")
+    Box(modifier.size(size), contentAlignment = Alignment.Center) {
+        if (ring > 0f) {
+            // A thin ring that closes as the reminder comes due: a state, not a decoration.
+            Canvas(Modifier.size(size)) {
+                val stroke = (this.size.minDimension * 0.07f).coerceAtLeast(1.5f)
+                val inset = stroke / 2f
+                val box = Size(this.size.width - stroke, this.size.height - stroke)
+                drawArc(tint.copy(alpha = 0.22f), 0f, 360f, false, Offset(inset, inset), box, style = Stroke(stroke))
+                drawArc(
+                    tint.copy(alpha = 0.95f), -90f, 360f * ring.coerceIn(0f, 1f), false,
+                    Offset(inset, inset), box, style = Stroke(stroke, cap = StrokeCap.Round),
+                )
+            }
+        }
+        MochiGlyph(
+            size = inner,
+            tint = tint,
+            mood = mood,
+            lookX = lookX,
+            outfit = outfit,
+            gesture = gesture,
+            gestureProgress = progress.value,
+            charging = charging,
+            thought = thought,
+        )
+    }
 }

@@ -35,6 +35,22 @@ object MochiIdleScript {
         else -> MochiMood.Idle
     }
 
+    /**
+     * Whether he may do a little gesture now: not while the person has system animations off (they
+     * asked for stillness) and not while the screen is off (nobody to see it, and it keeps the CPU
+     * asleep).
+     */
+    fun gesturesAllowed(reducedMotion: Boolean, screenOn: Boolean): Boolean = !reducedMotion && screenOn
+
+    /**
+     * How far into the quarter hour before the next reminder it is, 0..1; 0 when none is that close.
+     * Never below a sliver, so a ring that has just started is still seen. [remindAts] in unix seconds.
+     */
+    fun soonProgress(remindAts: List<Long>, nowMs: Long): Float {
+        val next = remindAts.map { it * 1000 }.filter { it in nowMs..(nowMs + SOON_MS) }.minOrNull() ?: return 0f
+        return (1f - (next - nowMs).toFloat() / SOON_MS).coerceIn(0.03f, 1f)
+    }
+
     /** Pause between two gestures: calm, never a nervous tic. */
     fun gapMs(rnd: Random): Long = 6_000L + rnd.nextLong(0L, 9_001L)
 

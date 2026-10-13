@@ -110,8 +110,21 @@ class IslandViewModel(
     private fun restOnTop() {
         unpinJob?.cancel()
         pinned = false
-        selectedKey = visibleNotifications.value.firstOrNull()?.key
-        selectedIndex.value = 0
+        val list = visibleNotifications.value
+        val rest = restingIndex(list)
+        selectedKey = list.getOrNull(rest)?.key
+        selectedIndex.value = rest
+    }
+
+    /**
+     * Where the island rests: the most important thing it holds, except Mochi's desk, which has his own
+     * bubble and never rests on the main pill when there is anything else (the overlay would move it off
+     * the desk anyway, and every round trip showed as the pill pulsing).
+     */
+    private fun restingIndex(list: List<IslandNotification>): Int {
+        if (list.size < 2) return 0
+        val i = list.indexOfFirst { it.key != com.agupta07505.smartisland.coucou.IslandDesk.KEY }
+        return if (i >= 0) i else 0
     }
 
     private fun shownOn(mine: Boolean, list: List<IslandNotification>) = shownOnThisDevice(mine, list)
@@ -167,7 +180,7 @@ class IslandViewModel(
                     val keep = pinned || expanded.value
                     val kept = if (keep) selectedKey?.let { k -> list.indexOfFirst { it.key == k } } ?: -1 else -1
                     if (kept < 0) pinned = false
-                    selectedIndex.value = if (kept >= 0) kept else 0
+                    selectedIndex.value = if (kept >= 0) kept else restingIndex(list)
                     selectedKey = list.getOrNull(selectedIndex.value)?.key
                 }
             }
