@@ -109,6 +109,43 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+        <!-- Jinx as the digital assistant: the side key / home long-press opens the panel. -->
+        <service
+            android:name=".coucou.assist.JinxVoiceInteractionService"
+            android:exported="true"
+            android:label="Jinx"
+            android:permission="android.permission.BIND_VOICE_INTERACTION">
+            <meta-data
+                android:name="android.voice_interaction"
+                android:resource="@xml/jinx_voice_interaction" />
+            <intent-filter>
+                <action android:name="android.service.voice.VoiceInteractionService" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".coucou.assist.JinxSessionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_VOICE_INTERACTION" />
+
+        <service
+            android:name=".coucou.assist.JinxRecognitionService"
+            android:exported="true"
+            android:label="Jinx"
+            tools:ignore="ExportedService">
+            <intent-filter>
+                <action android:name="android.speech.RecognitionService" />
+            </intent-filter>
+        </service>
+
+        <activity
+            android:name=".coucou.assist.JinxAssistActivity"
+            android:exported="false"
+            android:label="Jinx"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.SmartIsland" />
+
         <receiver
             android:name=".receiver.AutostartReceiver"
             android:exported="true">
