@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import com.agupta07505.smartisland.coucou.phone.SshPendientes
 import com.agupta07505.smartisland.coucou.phone.SyncOutcome
 import com.agupta07505.smartisland.di.SmartIslandRepositories
+import com.agupta07505.smartisland.model.AGENT_NEEDS_YOU
 import com.agupta07505.smartisland.model.IslandMode
 import com.agupta07505.smartisland.model.IslandNotification
 import kotlinx.coroutines.CoroutineScope
@@ -169,6 +170,9 @@ object CoucouRuntime {
 /** Puts what Claude Code is doing, and what it asks, on the island. */
 object IslandAgents {
     private const val KEY_AGENT = "coucou_agent"
+
+    /** Was the Claude Code card already asking for the person (so it only opens by itself once). */
+    @Volatile private var attentionShown = false
     fun approvalKey(id: String) = "coucou_approval_$id"
     fun questionKey(id: String) = "coucou_question_$id"
     fun idOf(key: String) = key.substringAfter("coucou_approval_").substringAfter("coucou_question_")
@@ -198,10 +202,18 @@ object IslandAgents {
             }
         }
 
-        // One line for the sessions: who is busy, and with what.
+        // One line for the sessions: who is busy, and with what. Merely working is the quietest thing
+        // on the island (it shows only when nothing else does). A session that needs the person — and
+        // whose request cannot be answered from here, like a background job's permission, which
+        // reaches the phone as a Notification only — is raised to just under a real question.
         val busy = ui.sessions.filter { it.state != SessionState.Idle }
+        val asked = ui.pending.map { it.session }.toSet()
+        val needing = busy.filter { it.state == SessionState.NeedsYou && it.session !in asked }
         if (ui.status == AgentUi.Status.Connected && busy.isNotEmpty() && ui.pending.isEmpty()) {
-            val s = busy.first()
+            val s = needing.firstOrNull() ?: busy.first()
+            val attention = needing.isNotEmpty()
+            // Starting to ask: post it as new, so it opens by itself (an update would only change the card).
+            if (attention && !attentionShown) repo.removeNotification(KEY_AGENT)
             keys += KEY_AGENT
             repo.postNotification(
                 IslandNotification(
@@ -209,12 +221,17 @@ object IslandAgents {
                     packageName = context.packageName,
                     appName = "Claude Code",
                     title = (s.project.ifEmpty { "Claude Code" }) + if (busy.size > 1) "  +${busy.size - 1}" else "",
-                    text = listOf(s.tool, s.detail).filter { it.isNotEmpty() }.joinToString(" · ").ifEmpty { "working" },
+                    text = listOf(s.tool, s.detail).filter { it.isNotEmpty() }.joinToString(" · ").ifEmpty { if (attention) "needs you" else "working" },
                     timeMillis = s.updatedAt,
                     mode = IslandMode.Agent,
+                    category = if (attention) AGENT_NEEDS_YOU else null,
                 ),
-                autoExpand = false,
+                // Opens by itself only when it starts asking for the person, not on every beat.
+                autoExpand = attention && !attentionShown,
             )
+            attentionShown = attention
+        } else {
+            attentionShown = false
         }
 
         for (gone in before - keys) repo.removeNotification(gone)

@@ -55,7 +55,10 @@ val IslandMode.priority: Int
         IslandMode.ScreenRecording, IslandMode.LiveActivity -> 70
         IslandMode.DownloadUpload -> 60
         IslandMode.Hotspot, IslandMode.Bluetooth, IslandMode.Flashlight -> 55
-        IslandMode.Agent -> 52
+        // Claude Code merely working is background: it shows only when nothing else has anything to
+        // say (above Mochi's desk, below music, news and the rest). What asks for the person is raised
+        // by effectivePriority (ATTENTION_PRIORITY), and real requests are Approval / Question.
+        IslandMode.Agent -> 30
         IslandMode.JinxMsg -> 95
         IslandMode.Music -> 50
         IslandMode.Notification -> 40
@@ -71,3 +74,9 @@ const val YIELDED_MUSIC_PRIORITY = 15
 
 /** From here up, the island is waiting for the person (a call, a permission, a question, a reminder). */
 const val WAITING_PRIORITY = 90
+
+/** The category of the Claude Code card when a session needs the person (see IslandAgents). */
+const val AGENT_NEEDS_YOU = "needs_you"
+
+/** A session that needs the person, whose request cannot be answered from the phone: just under a real question. */
+const val ATTENTION_PRIORITY = 99

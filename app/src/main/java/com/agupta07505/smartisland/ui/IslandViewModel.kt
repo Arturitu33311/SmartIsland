@@ -18,6 +18,8 @@ import com.agupta07505.smartisland.data.SmartIslandSettings
 import com.agupta07505.smartisland.data.SmartIslandSettingsRepository
 import com.agupta07505.smartisland.model.IslandMode
 import com.agupta07505.smartisland.model.IslandNotification
+import com.agupta07505.smartisland.model.AGENT_NEEDS_YOU
+import com.agupta07505.smartisland.model.ATTENTION_PRIORITY
 import com.agupta07505.smartisland.model.YIELDED_MUSIC_PRIORITY
 import com.agupta07505.smartisland.model.WAITING_PRIORITY
 import com.agupta07505.smartisland.model.priority
@@ -137,6 +139,8 @@ class IslandViewModel(
             notif.mode.priority
         } else if (notif.mode == IslandMode.Music) {
             YIELDED_MUSIC_PRIORITY
+        } else if (notif.mode == IslandMode.Agent && notif.category == AGENT_NEEDS_YOU) {
+            ATTENTION_PRIORITY
         } else {
             notif.mode.priority
         }

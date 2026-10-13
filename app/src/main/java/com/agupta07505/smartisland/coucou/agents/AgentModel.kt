@@ -157,6 +157,16 @@ class AgentModel {
     companion object {
         const val STALE_MS = 90_000L
         const val FORGET_MS = 30 * 60_000L
+
+        /**
+         * How long a "needs you" that no request backs (a Notification of Claude Code, which cannot be
+         * answered from here) is believed without news: the person answered it in the terminal, or
+         * left, and no hook says so. Without this a session stayed "asking" for ever.
+         */
+        const val ATTENTION_MS = 15 * 60_000L
+
+        /** Slack after a request's own time limit before the phone drops it (the laptop's clock rules). */
+        const val PENDING_GRACE_S = 20
     }
 
     fun apply(msg: RemoteMsg, now: Long) {
@@ -187,8 +197,19 @@ class AgentModel {
             "SessionEnd" -> sessions.remove(e.session)
             "Stop", "SubagentStop", "SessionStart" ->
                 sessions[e.session] = SessionInfo(e.session, project, SessionState.Idle, old?.tool ?: "", old?.detail ?: "", now)
-            "Notification" ->
-                sessions[e.session] = SessionInfo(e.session, project, SessionState.NeedsYou, "", e.message.ifEmpty { "needs you" }, now)
+            // Claude Code says "waiting for your input" when it has been idle a while: that is not
+            // asking for anything. A permission it cannot raise as a request (a background job's)
+            // arrives as a Notification only, and is worth the person's attention.
+            "Notification" -> {
+                val m = e.message
+                val idlePrompt = (m.contains("waiting for your input", true) || m.contains("esperando", true)) &&
+                    !(m.contains("permission", true) || m.contains("permiso", true))
+                sessions[e.session] = SessionInfo(
+                    e.session, project,
+                    if (idlePrompt) SessionState.Idle else SessionState.NeedsYou,
+                    "", m.ifEmpty { "needs you" }, now,
+                )
+            }
             // A new prompt: it is thinking until its first tool (no tool, no detail), as on the laptop.
             "UserPromptSubmit" ->
                 sessions[e.session] = SessionInfo(e.session, project, SessionState.Working, "", "", now)
@@ -203,9 +224,23 @@ class AgentModel {
 
     /** Sessions as they should look now: a "working" one that has been quiet for long is idle; old ones go. */
     fun view(now: Long): List<SessionInfo> {
-        sessions.entries.removeAll { now - it.value.updatedAt > FORGET_MS && it.value.state != SessionState.NeedsYou }
-        return sessions.values
-            .map { if (it.state == SessionState.Working && now - it.updatedAt > STALE_MS) it.copy(state = SessionState.Idle) else it }
+        // A request the laptop gave up on (its own limit plus a little) is not waiting any more, even if
+        // the "resolved" line was lost with the link.
+        pending.entries.removeAll { now - it.value.receivedAt > (it.value.timeoutS + PENDING_GRACE_S) * 1000L }
+        val asked = pending.values.map { it.session }.toSet()
+        val shown = sessions.values.map {
+            when {
+                it.state == SessionState.Working && now - it.updatedAt > STALE_MS -> it.copy(state = SessionState.Idle)
+                // A "needs you" nothing backs: the terminal answered it, or the person left. It fades.
+                it.state == SessionState.NeedsYou && it.session !in asked && now - it.updatedAt > ATTENTION_MS ->
+                    it.copy(state = SessionState.Idle)
+                else -> it
+            }
+        }
+        // Whatever has been quiet long enough is forgotten (judged after fading, so a stale "needs you" goes too).
+        sessions.entries.removeAll { e -> shown.any { it.session == e.key && it.state != SessionState.NeedsYou && now - it.updatedAt > FORGET_MS } }
+        return shown
+            .filter { it.session in sessions }
             .sortedWith(compareBy({ it.state.ordinal.let { o -> if (it.state == SessionState.NeedsYou) -1 else o } }, { -it.updatedAt }))
     }
 

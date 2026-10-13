@@ -65,6 +65,39 @@ class AgentModelTest {
     }
 
     @Test
+    fun waiting_for_input_is_not_asking_but_a_permission_is() {
+        val m = AgentModel()
+        m.apply(ev("PreToolUse", "Bash", "x"), 1_000)
+        m.apply(ev("Notification", message = "Claude is waiting for your input"), 2_000)
+        assertEquals(SessionState.Idle, m.view(2_000).single().state)
+        m.apply(ev("Notification", message = "Claude needs your permission to use Bash"), 3_000)
+        assertEquals(SessionState.NeedsYou, m.view(3_000).single().state)
+    }
+
+    @Test
+    fun a_needs_you_nothing_backs_fades_instead_of_asking_for_ever() {
+        val m = AgentModel()
+        m.apply(ev("Notification", message = "Claude needs your permission to use Bash"), 0)
+        assertEquals(SessionState.NeedsYou, m.view(AgentModel.ATTENTION_MS - 1).single().state)
+        assertEquals(SessionState.Idle, m.view(AgentModel.ATTENTION_MS + 1).single().state)
+        // …but one a waiting request backs stays until it is resolved.
+        val backed = AgentModel()
+        val req = parse("""{"t":"approval","request_id":"r1","session":"s1","project":"p","tool":"Bash","detail":"x","timeout_s":100000}""", 0)!!
+        backed.apply(req, 0)
+        assertEquals(SessionState.NeedsYou, backed.view(AgentModel.ATTENTION_MS + 1).single().state)
+    }
+
+    @Test
+    fun a_request_the_laptop_gave_up_on_is_dropped_even_if_its_resolved_line_was_lost() {
+        val m = AgentModel()
+        val req = parse("""{"t":"approval","request_id":"r2","session":"s2","project":"p","tool":"Bash","detail":"x","timeout_s":108}""", 0)!!
+        m.apply(req, 0)
+        assertNotNull(m.nextPending())
+        m.view((108 + AgentModel.PENDING_GRACE_S) * 1000L + 1)
+        assertNull(m.nextPending())
+    }
+
+    @Test
     fun a_quiet_session_stops_looking_busy_and_an_old_one_is_forgotten() {
         val m = AgentModel()
         m.apply(ev("PreToolUse", "Edit", "a.kt"), 0)
