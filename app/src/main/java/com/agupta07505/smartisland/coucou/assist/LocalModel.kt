@@ -50,6 +50,25 @@ class ModelStore(private val dir: File, private val spec: ModelSpec) {
      */
     fun download(open: (from: Long) -> InputStream, onProgress: (Long) -> Unit) {
         dir.mkdirs()
+        // One writer at a time, across threads and processes: two downloaders appending to the same `.part`
+        // interleave their bytes and the file never matches its hash. The second one is refused, not queued.
+        java.io.RandomAccessFile(File(dir, spec.fileName + ".lock"), "rw").use { raf ->
+            val lock = try {
+                raf.channel.tryLock()
+            } catch (e: java.nio.channels.OverlappingFileLockException) {
+                null
+            }
+            if (lock == null) throw ChatException("Ya hay una descarga en curso")
+            try {
+                downloadLocked(open, onProgress)
+            } finally {
+                runCatching { lock.release() }
+            }
+        }
+    }
+
+    private fun downloadLocked(open: (from: Long) -> InputStream, onProgress: (Long) -> Unit) {
+        dir.mkdirs()
         if (finalFile.exists() && finalFile.length() != spec.sizeBytes) finalFile.delete()
         var have = if (partFile.exists()) partFile.length() else 0L
         if (have > spec.sizeBytes) {
@@ -88,8 +107,11 @@ class ModelStore(private val dir: File, private val spec: ModelSpec) {
         }
         val actual = digest.digest().joinToString("") { "%02x".format(it) }
         if (!actual.equals(spec.sha256, ignoreCase = true)) {
+            val size = partFile.length()
             partFile.delete()
-            throw ChatException("La huella del modelo no coincide; descarga descartada")
+            throw ChatException(
+                "La huella del modelo no coincide (obtenida ${actual.take(12)}…, ${size} bytes de ${spec.sizeBytes}); descarga descartada",
+            )
         }
         if (finalFile.exists()) finalFile.delete()
         check(partFile.renameTo(finalFile)) { "No se pudo guardar el modelo" }

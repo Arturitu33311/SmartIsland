@@ -102,6 +102,47 @@ class ModelStoreTest {
         assertEquals(ModelState.Partial(400, 1000), s.state())
     }
 
+    @Test fun aSecondDownloadWhileOneRunsIsRefusedAndNeverTouchesThePart() {
+        val s = store()
+        val firstReading = java.util.concurrent.CountDownLatch(1)
+        val letFirstFinish = java.util.concurrent.CountDownLatch(1)
+        val slow = object : java.io.InputStream() {
+            var sent = 0
+            override fun read(): Int = throw UnsupportedOperationException()
+            override fun read(b: ByteArray, off: Int, len: Int): Int {
+                if (sent == 0) {
+                    val k = minOf(len, 500)
+                    System.arraycopy(data, 0, b, off, k)
+                    sent = k
+                    firstReading.countDown()          // the first download now holds the file
+                    letFirstFinish.await()
+                    return k
+                }
+                if (sent >= data.size) return -1
+                val k = minOf(len, data.size - sent)
+                System.arraycopy(data, sent, b, off, k)
+                sent += k
+                return k
+            }
+        }
+        var firstError: Throwable? = null
+        val t = Thread {
+            try { s.download(open = { slow }, onProgress = {}) } catch (e: Throwable) { firstError = e }
+        }
+        t.start()
+        assertTrue(firstReading.await(5, java.util.concurrent.TimeUnit.SECONDS))
+        try {
+            s.download(open = { ByteArrayInputStream(data) }, onProgress = {})
+            fail("a second concurrent download must be refused")
+        } catch (e: ChatException) {
+            assertTrue(e.message!!.contains("en curso", ignoreCase = true))
+        }
+        letFirstFinish.countDown()
+        t.join(5_000)
+        assertEquals(null, firstError)
+        assertEquals(ModelState.Ready, s.state())          // the file is the first one's, uncorrupted
+    }
+
     @Test fun resumesFromWhatIsAlreadyThere() {
         val s = store()
         File(tmp.root, "models").mkdirs()

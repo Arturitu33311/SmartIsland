@@ -99,6 +99,14 @@ class AssistModel(app: Application) : AndroidViewModel(app) {
     private val _ui = MutableStateFlow(AssistUi(lines = store.all(), model = modelStore.state()))
     val ui: StateFlow<AssistUi> = _ui.asStateFlow()
 
+    init {
+        viewModelScope.launch {
+            ModelDownloads.percent.collect { p ->
+                _ui.update { it.copy(modelBusy = p >= 0, modelPercent = p) }
+            }
+        }
+    }
+
     /** Only one background round with the laptop at a time (opening the panel again must not stack them). */
     private val warming = AtomicBoolean(false)
 
@@ -189,12 +197,13 @@ class AssistModel(app: Application) : AndroidViewModel(app) {
 
     /** Downloads the on-device model (2.6 GB) on an unmetered network; keeps going if the panel is closed. */
     fun downloadModel() {
-        if (_ui.value.modelBusy || modelStore.state() == ModelState.Ready) return
+        if (_ui.value.modelBusy || ModelDownloads.percent.value >= 0 || modelStore.state() == ModelState.Ready) return
         if (!isUnmetered(appContext)) {
             refresh { it.copy(notice = "Conéctate a Wi-Fi para bajar el modelo local (2.6 GB).") }
             return
         }
         _ui.update { it.copy(modelBusy = true, modelPercent = 0, notice = "") }
+        ModelDownloads.percent.value = 0
         ModelDownloads.scope.launch {
             val spec = GemmaModel.spec
             // Each cut continues from the bytes on disk, and the Wi-Fi gate is asked before every attempt.
@@ -206,7 +215,7 @@ class AssistModel(app: Application) : AndroidViewModel(app) {
                         open = { from -> openModelStream(spec.url, from) },
                         onProgress = { bytes ->
                             val pct = (bytes * 100 / spec.sizeBytes).toInt()
-                            if (pct != _ui.value.modelPercent) _ui.update { it.copy(modelPercent = pct) }
+                            if (pct != ModelDownloads.percent.value) ModelDownloads.percent.value = pct
                         },
                     )
                 },
@@ -216,6 +225,7 @@ class AssistModel(app: Application) : AndroidViewModel(app) {
                 pause = { kotlinx.coroutines.delay(it) },
             )
             val msg = if (outcome == DownloadOutcome.Done) "Modelo local listo." else reason ?: "Descarga interrumpida."
+            ModelDownloads.percent.value = -1
             refresh { it.copy(modelBusy = false, modelPercent = -1, notice = msg) }
         }
     }
@@ -354,6 +364,9 @@ private const val MAX_DOWNLOAD_TRIES = 30
 /** Downloads outlive the panel: they run in the process, not in the screen's view model. */
 internal object ModelDownloads {
     val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+
+    /** -1 when nothing is downloading, else the percentage; shared by every panel that is opened meanwhile. */
+    val percent = MutableStateFlow(-1)
 }
 
 private fun isUnmetered(context: android.content.Context): Boolean {
