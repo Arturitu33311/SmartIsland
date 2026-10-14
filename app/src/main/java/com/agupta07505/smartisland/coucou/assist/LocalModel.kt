@@ -101,6 +101,39 @@ class ModelStore(private val dir: File, private val spec: ModelSpec) {
     }
 }
 
+enum class DownloadOutcome { Done, Interrupted, Paused, Rejected }
+
+/**
+ * Runs download attempts until one finishes. The network gate is asked before EVERY attempt, not once:
+ * a retry loop that only checked at the start would keep pulling 2.6 GB after the phone left Wi-Fi.
+ * Returns the outcome and a human reason when it is not [DownloadOutcome.Done].
+ */
+suspend fun runDownloadAttempts(
+    maxTries: Int,
+    networkOk: () -> Boolean,
+    attempt: () -> Unit,
+    onRetry: (attemptNumber: Int, cause: Exception) -> Unit,
+    pause: suspend (Long) -> Unit,
+): Pair<DownloadOutcome, String?> {
+    var last: String? = null
+    for (n in 1..maxTries) {
+        if (!networkOk()) return DownloadOutcome.Paused to "Descarga en pausa: sin Wi-Fi. Continúa donde quedó al volver."
+        try {
+            attempt()
+            return DownloadOutcome.Done to null
+        } catch (e: ChatException) {
+            return DownloadOutcome.Rejected to (e.message ?: "El archivo del modelo no es válido.")
+        } catch (e: Exception) {
+            last = "Descarga interrumpida (${e.message ?: e.javaClass.simpleName})"
+            onRetry(n, e)
+            if (n < maxTries) pause(RETRY_PAUSE_MS)
+        }
+    }
+    return DownloadOutcome.Interrupted to "${last ?: "Descarga interrumpida"}; vuelve a tocar Descargar para continuar."
+}
+
+private const val RETRY_PAUSE_MS = 3_000L
+
 /** What the on-device model is given: a short system text, the last few turns, and the user's line. */
 data class LocalPromptBuilt(val system: String, val history: List<ChatLine>, val user: String)
 

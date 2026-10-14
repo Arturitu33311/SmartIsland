@@ -197,10 +197,11 @@ class AssistModel(app: Application) : AndroidViewModel(app) {
         _ui.update { it.copy(modelBusy = true, modelPercent = 0, notice = "") }
         ModelDownloads.scope.launch {
             val spec = GemmaModel.spec
-            var msg = "Descarga interrumpida; vuelve a tocar Descargar para continuar donde quedó."
-            // A 2.6 GB download over a mobile CDN gets cut now and then: each cut continues from the bytes on disk.
-            for (attempt in 1..MAX_DOWNLOAD_TRIES) {
-                try {
+            // Each cut continues from the bytes on disk, and the Wi-Fi gate is asked before every attempt.
+            val (outcome, reason) = runDownloadAttempts(
+                maxTries = MAX_DOWNLOAD_TRIES,
+                networkOk = { isUnmetered(appContext) },
+                attempt = {
                     modelStore.download(
                         open = { from -> openModelStream(spec.url, from) },
                         onProgress = { bytes ->
@@ -208,17 +209,13 @@ class AssistModel(app: Application) : AndroidViewModel(app) {
                             if (pct != _ui.value.modelPercent) _ui.update { it.copy(modelPercent = pct) }
                         },
                     )
-                    msg = "Modelo local listo."
-                    break
-                } catch (e: ChatException) {
-                    msg = e.message ?: "No se pudo bajar el modelo."   // the file was wrong: do not loop
-                    break
-                } catch (e: Exception) {
-                    msg = "Descarga interrumpida (${e.message ?: e.javaClass.simpleName}); reintento $attempt de $MAX_DOWNLOAD_TRIES."
-                    refresh { it.copy(notice = msg) }
-                    kotlinx.coroutines.delay(3_000)
-                }
-            }
+                },
+                onRetry = { n, e ->
+                    refresh { it.copy(notice = "Descarga interrumpida (${e.message ?: e.javaClass.simpleName}); reintento $n de $MAX_DOWNLOAD_TRIES.") }
+                },
+                pause = { kotlinx.coroutines.delay(it) },
+            )
+            val msg = if (outcome == DownloadOutcome.Done) "Modelo local listo." else reason ?: "Descarga interrumpida."
             refresh { it.copy(modelBusy = false, modelPercent = -1, notice = msg) }
         }
     }

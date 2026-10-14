@@ -2,7 +2,9 @@ package com.agupta07505.smartisland.coucou
 
 import com.agupta07505.smartisland.coucou.assist.ChatException
 import com.agupta07505.smartisland.coucou.assist.ChatLine
+import com.agupta07505.smartisland.coucou.assist.DownloadOutcome
 import com.agupta07505.smartisland.coucou.assist.IdlePolicy
+import com.agupta07505.smartisland.coucou.assist.runDownloadAttempts
 import com.agupta07505.smartisland.coucou.assist.LlmRuntime
 import com.agupta07505.smartisland.coucou.assist.LocalModelBrain
 import com.agupta07505.smartisland.coucou.assist.LocalPrompt
@@ -114,6 +116,61 @@ class ModelStoreTest {
         File(tmp.root, "models").mkdirs()
         File(tmp.root, "models/m.litertlm").writeBytes(data.copyOf(10))
         assertEquals(ModelState.NotDownloaded, store().state())
+    }
+}
+
+class DownloadAttemptsTest {
+    @Test fun finishesOnTheFirstSuccess() {
+        var calls = 0
+        val r = kotlinx.coroutines.runBlocking {
+            runDownloadAttempts(5, networkOk = { true }, attempt = { calls++ }, onRetry = { _, _ -> }, pause = {})
+        }
+        assertEquals(DownloadOutcome.Done, r.first)
+        assertEquals(1, calls)
+    }
+
+    @Test fun retriesAfterInterruptionsAndThenGivesUpWithTheLastReason() {
+        var calls = 0
+        val r = kotlinx.coroutines.runBlocking {
+            runDownloadAttempts(3, networkOk = { true }, attempt = { calls++; throw java.io.IOException("reset") }, onRetry = { _, _ -> }, pause = {})
+        }
+        assertEquals(DownloadOutcome.Interrupted, r.first)
+        assertEquals(3, calls)
+        assertTrue(r.second!!.contains("reset"))
+    }
+
+    @Test fun theNetworkIsCheckedBeforeEveryAttemptNotOnlyTheFirst() {
+        var calls = 0
+        var onWifi = true
+        val r = kotlinx.coroutines.runBlocking {
+            runDownloadAttempts(
+                10,
+                networkOk = { onWifi },
+                attempt = { calls++; onWifi = false; throw java.io.IOException("cut") },   // the phone leaves Wi-Fi
+                onRetry = { _, _ -> },
+                pause = {},
+            )
+        }
+        assertEquals(DownloadOutcome.Paused, r.first)
+        assertEquals(1, calls)      // it did not spend mobile data on a second attempt
+    }
+
+    @Test fun aRejectedFileStopsTheLoop() {
+        var calls = 0
+        val r = kotlinx.coroutines.runBlocking {
+            runDownloadAttempts(5, networkOk = { true }, attempt = { calls++; throw ChatException("huella") }, onRetry = { _, _ -> }, pause = {})
+        }
+        assertEquals(DownloadOutcome.Rejected, r.first)
+        assertEquals(1, calls)
+    }
+
+    @Test fun noNetworkAtAllNeverStartsAnAttempt() {
+        var calls = 0
+        val r = kotlinx.coroutines.runBlocking {
+            runDownloadAttempts(5, networkOk = { false }, attempt = { calls++ }, onRetry = { _, _ -> }, pause = {})
+        }
+        assertEquals(DownloadOutcome.Paused, r.first)
+        assertEquals(0, calls)
     }
 }
 
