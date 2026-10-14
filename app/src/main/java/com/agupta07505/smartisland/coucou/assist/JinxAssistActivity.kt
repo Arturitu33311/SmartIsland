@@ -68,6 +68,10 @@ data class AssistUi(
     /** Which brain answered last: "laptop", "este teléfono · nube"… shown as a badge. */
     val badge: String = "",
     val notice: String = "",
+    /** The on-device model: not there, being downloaded (with a percentage), or ready. */
+    val model: ModelState = ModelState.NotDownloaded,
+    val modelPercent: Int = -1,
+    val modelBusy: Boolean = false,
 )
 
 class AssistModel(app: Application) : AndroidViewModel(app) {
@@ -76,13 +80,23 @@ class AssistModel(app: Application) : AndroidViewModel(app) {
     private val secrets = KeystoreSecrets(app)
     private val deviceId = PhoneSettings.deviceId(app)
     private val laptopApi = LaptopChatApi(app) { PhoneSettings.profile(app, PhoneSettings.LAPTOP) }
+    private val modelStore = ModelStore(File(app.filesDir, "models"), GemmaModel.spec)
+    private val localBrain = LocalModelBrain(
+        modelReady = { modelStore.state() == ModelState.Ready },
+        persona = { personas.load() },
+        factory = {
+            LiteRtRuntime(modelStore.modelFile().path, File(app.cacheDir, "litert").apply { mkdirs() }.path)
+        },
+    )
     private val repo = ChatRepository(
         store, deviceId, laptopApi,
-        listOf(OpenRouterBrain(secrets, { personas.load() })),
+        // Laptop first (in the repository), then OpenRouter from this phone, then the model that lives here.
+        listOf(OpenRouterBrain(secrets, { personas.load() }), localBrain),
         TelegramMirror(secrets),
     )
+    private val appContext = app
 
-    private val _ui = MutableStateFlow(AssistUi(lines = store.all()))
+    private val _ui = MutableStateFlow(AssistUi(lines = store.all(), model = modelStore.state()))
     val ui: StateFlow<AssistUi> = _ui.asStateFlow()
 
     /** Only one background round with the laptop at a time (opening the panel again must not stack them). */
@@ -90,7 +104,7 @@ class AssistModel(app: Application) : AndroidViewModel(app) {
 
     /** Every write goes through [update], so two coroutines can never overwrite each other's field. */
     private fun refresh(change: (AssistUi) -> AssistUi = { it }) {
-        _ui.update { change(it).copy(lines = store.all()) }
+        _ui.update { change(it).copy(lines = store.all(), model = modelStore.state()) }
     }
 
     /**
@@ -173,7 +187,53 @@ class AssistModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Downloads the on-device model (2.6 GB) on an unmetered network; keeps going if the panel is closed. */
+    fun downloadModel() {
+        if (_ui.value.modelBusy || modelStore.state() == ModelState.Ready) return
+        if (!isUnmetered(appContext)) {
+            refresh { it.copy(notice = "Conéctate a Wi-Fi para bajar el modelo local (2.6 GB).") }
+            return
+        }
+        _ui.update { it.copy(modelBusy = true, modelPercent = 0, notice = "") }
+        ModelDownloads.scope.launch {
+            val msg = try {
+                val spec = GemmaModel.spec
+                modelStore.download(
+                    open = { from -> openModelStream(spec.url, from) },
+                    onProgress = { bytes ->
+                        val pct = (bytes * 100 / spec.sizeBytes).toInt()
+                        if (pct != _ui.value.modelPercent) _ui.update { it.copy(modelPercent = pct) }
+                    },
+                )
+                "Modelo local listo."
+            } catch (e: ChatException) {
+                e.message ?: "No se pudo bajar el modelo."
+            } catch (e: Exception) {
+                "Descarga interrumpida (${e.message ?: e.javaClass.simpleName}); se continúa donde quedó."
+            }
+            refresh { it.copy(modelBusy = false, modelPercent = -1, notice = msg) }
+        }
+    }
+
+    /** Runs one short question on the on-device model, so the offline brain can be checked on its own. */
+    fun testLocalModel() {
+        if (_ui.value.modelBusy) return
+        _ui.update { it.copy(modelBusy = true, notice = "Cargando el modelo local…") }
+        viewModelScope.launch(Dispatchers.IO) {
+            val t = android.os.SystemClock.elapsedRealtime()
+            val msg = try {
+                val probe = listOf(ChatLine("probe:me", 0.0, deviceId, "Di hola en una frase corta.", null, false))
+                val text = localBrain.reply(probe)
+                "Modelo local (${(android.os.SystemClock.elapsedRealtime() - t) / 1000.0} s): $text"
+            } catch (e: ChatException) {
+                e.message ?: "El modelo local no respondió."
+            }
+            refresh { it.copy(modelBusy = false, notice = msg) }
+        }
+    }
+
     override fun onCleared() {
+        localBrain.release()
         laptopApi.close()
         super.onCleared()
     }
@@ -227,6 +287,7 @@ private fun AssistScreen(model: AssistModel) {
                 modifier = Modifier.padding(top = 6.dp),
             )
         }
+        ModelRow(ui, onDownload = { model.downloadModel() }, onTest = { model.testLocalModel() })
         if (ui.notice.isNotEmpty()) {
             Text(ui.notice, color = Color(0xFFFFB74D), fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
         }
@@ -251,6 +312,24 @@ private fun AssistScreen(model: AssistModel) {
 }
 
 @Composable
+private fun ModelRow(ui: AssistUi, onDownload: () -> Unit, onTest: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        val label = when {
+            ui.modelBusy && ui.modelPercent >= 0 -> "Modelo local: descargando ${ui.modelPercent} %"
+            ui.model == ModelState.Ready -> "Modelo local: listo (sin conexión)"
+            ui.model is ModelState.Partial -> "Modelo local: descarga a medias"
+            else -> "Modelo local: no descargado"
+        }
+        Text(label, color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp, modifier = Modifier.weight(1f))
+        if (ui.model == ModelState.Ready) {
+            TextButton(onClick = onTest, enabled = !ui.modelBusy) { Text("Probar") }
+        } else {
+            TextButton(onClick = onDownload, enabled = !ui.modelBusy) { Text("Descargar 2.6 GB") }
+        }
+    }
+}
+
+@Composable
 private fun Bubble(l: ChatLine) {
     val mine = !l.fromJinx
     Box(Modifier.fillMaxWidth(), contentAlignment = if (mine) Alignment.CenterEnd else Alignment.CenterStart) {
@@ -263,4 +342,39 @@ private fun Bubble(l: ChatLine) {
             if (l.src == "tg") Text("Telegram", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
         }
     }
+}
+
+/** Downloads outlive the panel: they run in the process, not in the screen's view model. */
+internal object ModelDownloads {
+    val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+}
+
+private fun isUnmetered(context: android.content.Context): Boolean {
+    val cm = context.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+    val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+    return caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+}
+
+/** A stream of the model starting at byte [from] (HTTP Range). If the server ignores Range, the prefix is skipped. */
+private fun openModelStream(url: String, from: Long): java.io.InputStream {
+    val c = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+    c.connectTimeout = 15_000
+    c.readTimeout = 60_000
+    if (from > 0) c.setRequestProperty("Range", "bytes=$from-")
+    c.connect()
+    val code = c.responseCode
+    if (code != 200 && code != 206) {
+        c.disconnect()
+        throw java.io.IOException("HTTP $code")
+    }
+    val input = c.inputStream
+    if (from > 0 && code == 200) {
+        var left = from
+        while (left > 0) {
+            val n = input.skip(left)
+            if (n <= 0) break
+            left -= n
+        }
+    }
+    return input
 }

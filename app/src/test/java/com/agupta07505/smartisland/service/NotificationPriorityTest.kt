@@ -16,6 +16,8 @@ import com.agupta07505.smartisland.util.NotificationFilter
 import com.agupta07505.smartisland.util.toIslandMode
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.setMain
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -25,6 +27,8 @@ class NotificationPriorityTest {
 
     @org.junit.Before
     fun setUp() {
+        // The service builds scopes on Dispatchers.Main; coroutines 1.11 no longer boots it on the plain JVM.
+        kotlinx.coroutines.Dispatchers.setMain(kotlinx.coroutines.test.UnconfinedTestDispatcher())
         io.mockk.mockkStatic(android.util.Log::class)
         every { android.util.Log.e(any(), any(), any()) } returns 0
         every { android.util.Log.e(any(), any()) } returns 0
@@ -36,6 +40,7 @@ class NotificationPriorityTest {
 
     @org.junit.After
     fun tearDown() {
+        kotlinx.coroutines.Dispatchers.resetMain()
         io.mockk.unmockkStatic(android.util.Log::class)
     }
 

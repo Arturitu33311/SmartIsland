@@ -146,13 +146,17 @@ dependencies {
     implementation("org.bouncycastle:bcprov-jdk18on:1.86")
     implementation("org.bouncycastle:bcpkix-jdk18on:1.86")
     implementation("org.slf4j:slf4j-nop:2.0.17")
+    // Jinx's on-device model (Gemma through LiteRT-LM): answers with no internet and no other device.
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.18.0")
 
     debugImplementation(composeBom)
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("io.mockk:mockk:1.13.10")
-    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.0")
+    // Same version the app resolves: litertlm-android brings coroutines 1.11, and a test artifact that is
+    // older breaks Dispatchers.setMain.
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
     testImplementation("app.cash.turbine:turbine:1.1.0")
     testImplementation("org.json:json:20240303")
 
