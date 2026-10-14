@@ -11,6 +11,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -40,6 +41,24 @@ class Deps:
     # respuesta sale de inmediato. El gateway sigue siendo responsable: la línea queda mirrored:false
     # en el hilo y se reintenta en cada op.
     defer_mirror: Optional[Callable[[], None]] = None
+
+
+_TOKEN_RE = re.compile(r"(?:bot)?\d{6,}(?::|%3A)[A-Za-z0-9_-]{20,}", re.IGNORECASE)
+
+
+def redact(text):
+    """Quita de cualquier texto lo que parezca un token de bot de Telegram (nunca debe llegar a un log)."""
+    return _TOKEN_RE.sub("<token>", str(text))
+
+
+def append_log(path, line):
+    """Añade una línea ya redactada a un log privado (0600)."""
+    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+        os.write(fd, (redact(line).rstrip("\n") + "\n").encode("utf-8", "replace"))
+    finally:
+        os.close(fd)
 
 
 def _err(msg):
@@ -199,7 +218,7 @@ class TelegramMirror:
                 self.last_error = "" if ok else "HTTP %s" % r.status
                 return ok
         except Exception as e:  # noqa: BLE001 - sin red, 4xx, timeout: se reintenta luego
-            self.last_error = type(e).__name__ + ": " + str(e).replace(self.token, "<token>")
+            self.last_error = redact(type(e).__name__ + ": " + str(e).replace(self.token, "<token>"))
             return False
 
 
@@ -323,8 +342,7 @@ def flush_mirror_main():
 
     def log(msg):
         try:
-            with open(log_path, "a", encoding="utf-8") as f:
-                f.write("%s flush-mirror: %s\n" % (time.strftime("%Y-%m-%dT%H:%M:%S"), msg))
+            append_log(log_path, "%s flush-mirror: %s" % (time.strftime("%Y-%m-%dT%H:%M:%S"), msg))
         except OSError:
             pass
 

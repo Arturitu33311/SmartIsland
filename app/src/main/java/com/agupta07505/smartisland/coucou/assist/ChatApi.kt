@@ -19,6 +19,23 @@ interface ChatApi {
 }
 
 /**
+ * When a kept ssh connection may be used again. An ssh session stays valid after the server drops the key
+ * from `authorized_keys`, so a long-lived connection would outlive a revocation: it is dropped when the
+ * profile it was opened for changes (host, port, user, pinned host key), when the profile is no longer
+ * paired, after a short idle time, and after a maximum age even if busy.
+ */
+object ConnectionPolicy {
+    const val IDLE_MS = 90_000L
+    const val MAX_AGE_MS = 5 * 60_000L
+
+    fun reusable(openedFor: SshProfile, current: SshProfile, openedAt: Long, lastUsed: Long, now: Long): Boolean =
+        current.paired &&
+            openedFor == current &&
+            now - lastUsed <= IDLE_MS &&
+            now - openedAt <= MAX_AGE_MS
+}
+
+/**
  * The real thing: one ssh command (`jinx-chat`) per request, with the phone's own key. The connection is
  * kept between requests (logging in costs more than the request itself) and replaced when it has gone stale.
  */
@@ -27,6 +44,9 @@ class LaptopChatApi(
     private val profile: () -> SshProfile,
 ) : ChatApi, Closeable {
     private var conn: Ssh.Connection? = null
+    private var openedFor: SshProfile? = null
+    private var openedAt = 0L
+    private var lastUsed = 0L
 
     @Synchronized
     private fun ask(request: String, timeoutSec: Long): String {
@@ -34,26 +54,42 @@ class LaptopChatApi(
         // Twice: a kept connection may have died while the phone slept; the second try opens a fresh one.
         // Resending is safe, the gateway answers the same cid once.
         repeat(2) {
+            val now = System.currentTimeMillis()
+            val current = profile()
+            val kept = conn
+            if (kept != null && !(kept.connected && openedFor?.let { ConnectionPolicy.reusable(it, current, openedAt, lastUsed, now) } == true)) {
+                dropConnection()
+            }
             val c = try {
-                conn?.takeIf { it.connected } ?: Ssh.open(context, profile(), connectTimeoutMs = PROBE_MS).also { conn = it }
+                conn ?: Ssh.open(context, current, connectTimeoutMs = PROBE_MS).also {
+                    conn = it
+                    openedFor = current
+                    openedAt = now
+                }
             } catch (e: SshException) {
                 throw ChatException(e.message ?: "la laptop no responde")
             }
             try {
-                return c.exec("jinx-chat", request + "\n", timeoutSec)
+                val out = c.exec("jinx-chat", request + "\n", timeoutSec)
+                lastUsed = System.currentTimeMillis()
+                return out
             } catch (e: Exception) {
                 failure = e.message
-                runCatching { c.close() }
-                conn = null
+                dropConnection()
             }
         }
         throw ChatException(failure ?: "la laptop no responde")
     }
 
-    @Synchronized
-    override fun close() {
+    private fun dropConnection() {
         runCatching { conn?.close() }
         conn = null
+        openedFor = null
+    }
+
+    @Synchronized
+    override fun close() {
+        dropConnection()
     }
 
     override fun send(text: String, cid: String, src: String) =

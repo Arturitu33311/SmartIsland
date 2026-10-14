@@ -245,6 +245,35 @@ class BrainTest(unittest.TestCase):
         self.assertEqual((mode, text), ("local", "<local>"))
 
 
+class RedactionTest(unittest.TestCase):
+    TOKEN = "6528281557:AAH_exampleExampleExampleExample-123"
+
+    def test_redact_removes_bot_tokens_in_any_shape(self):
+        for raw in (
+            "HTTPError url https://api.telegram.org/bot%s/sendMessage 502" % self.TOKEN,
+            "fallo con %s al enviar" % self.TOKEN,
+            "bot%s" % self.TOKEN.replace(":", "%3A"),
+        ):
+            out = jinx_chat.redact(raw)
+            self.assertNotIn("AAH_example", out, raw)
+            self.assertNotIn("6528281557:", out, raw)
+
+    def test_mirror_error_never_contains_the_token(self):
+        def opener(req, timeout=0):
+            raise OSError("fallo en https://api.telegram.org/bot%s/sendMessage" % self.TOKEN)
+        m = jinx_chat.TelegramMirror(self.TOKEN, "42", opener=opener)
+        self.assertFalse(m.send("x"))
+        self.assertNotIn("AAH_example", m.last_error)
+        self.assertNotIn("6528281557:", m.last_error)
+
+    def test_log_file_is_private_and_redacted(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "gateway.log")
+            jinx_chat.append_log(path, "x bot%s y" % self.TOKEN)
+            self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+            self.assertNotIn("AAH_example", open(path).read())
+
+
 class LazyMirrorTest(unittest.TestCase):
     def test_building_the_mirror_does_not_touch_the_vault(self):
         calls = []
