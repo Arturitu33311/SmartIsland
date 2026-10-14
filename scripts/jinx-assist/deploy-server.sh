@@ -3,10 +3,13 @@
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 host="${JINX_HERMES_SSH:-server}"
-dest="/home/alan/.hermes/scripts/jinx_hermes_chat.py"
 stamp="$(date +%Y%m%d-%H%M%S)"
-ssh -o BatchMode=yes "$host" "[ -e '$dest' ] && cp -p '$dest' '$dest.bak-$stamp' || true"
-scp -q "$here/server/jinx_hermes_chat.py" "$host:$dest"
+for f in jinx_hermes_chat.py coucou_pendientes.py; do
+  dest="/home/alan/.hermes/scripts/$f"
+  ssh -o BatchMode=yes "$host" "[ -e '$dest' ] && cp -p '$dest' '$dest.bak-$stamp' || true"
+  scp -q "$here/server/$f" "$host:$dest"
+done
+dest="/home/alan/.hermes/scripts/jinx_hermes_chat.py"
 echo '{"op":"history","n":1}' | ssh -o BatchMode=yes "$host" \
   "/home/alan/.hermes/hermes-agent/venv/bin/python $dest" | head -c 120; echo
-echo "ok: puente de Hermes desplegado en $host:$dest"
+echo "ok: puente de Hermes y gateway de pendientes desplegados en $host"
