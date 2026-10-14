@@ -70,6 +70,12 @@ class ModelStore(private val dir: File, private val spec: ModelSpec) {
                     }
                 }
             }
+            // A connection that is closed early reads as "end of file", not as an error. It is not a finished
+            // download: the bytes stay, and the next try continues from them (never hash a short file).
+            val got = partFile.length()
+            if (got < spec.sizeBytes) {
+                throw java.io.IOException("Descarga incompleta ($got de ${spec.sizeBytes} bytes)")
+            }
         }
         val digest = MessageDigest.getInstance("SHA-256")
         partFile.inputStream().use { s ->

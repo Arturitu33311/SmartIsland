@@ -63,6 +63,43 @@ class ModelStoreTest {
         assertFalse(File(tmp.root, "models/m.litertlm.part").exists())   // a bad file is not resumed again
     }
 
+    @Test fun aConnectionThatEndsEarlyKeepsTheBytesAndTheNextTryContinues() {
+        val s = store()
+        try {
+            s.download(open = { ByteArrayInputStream(data.copyOf(700)) }, onProgress = {})
+            fail("an incomplete download must not look finished")
+        } catch (e: java.io.IOException) {
+            assertTrue(e.message!!.contains("incompleta", ignoreCase = true))
+        }
+        assertEquals(ModelState.Partial(700, 1000), s.state())       // nothing was thrown away
+        var asked = -1L
+        s.download(open = { from -> asked = from; ByteArrayInputStream(data.copyOfRange(from.toInt(), data.size)) }, onProgress = {})
+        assertEquals(700L, asked)
+        assertEquals(ModelState.Ready, s.state())
+    }
+
+    @Test fun anErrorMidStreamKeepsWhatWasWritten() {
+        val s = store()
+        val flaky = object : java.io.InputStream() {
+            var n = 0
+            override fun read(): Int = throw UnsupportedOperationException()
+            override fun read(b: ByteArray, off: Int, len: Int): Int {
+                if (n >= 400) throw java.io.IOException("Connection reset")
+                val k = minOf(len, 400 - n)
+                System.arraycopy(data, n, b, off, k)
+                n += k
+                return k
+            }
+        }
+        try {
+            s.download(open = { flaky }, onProgress = {})
+            fail("should propagate")
+        } catch (e: java.io.IOException) {
+            assertTrue(e.message!!.contains("reset", ignoreCase = true))
+        }
+        assertEquals(ModelState.Partial(400, 1000), s.state())
+    }
+
     @Test fun resumesFromWhatIsAlreadyThere() {
         val s = store()
         File(tmp.root, "models").mkdirs()
