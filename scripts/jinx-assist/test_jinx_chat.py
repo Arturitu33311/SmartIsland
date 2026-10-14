@@ -164,6 +164,16 @@ class GatewayTest(unittest.TestCase):
         self.assertEqual(ev["added"], 0)
         self.assertEqual(ev["mirrored_ids"], ["c9:s22"])
 
+    def test_deferred_mirror_answers_without_waiting_for_telegram(self):
+        deferred = []
+        self.deps.defer_mirror = lambda: deferred.append(1)
+        ev = self.events({"op": "send", "text": "hola", "cid": "c1", "src": "s21"})
+        self.assertEqual(ev[-1]["ev"], "done")
+        self.assertEqual(self.mirror.sent, [])          # Telegram no se tocó antes de contestar
+        self.assertEqual(deferred, [1])                  # se delegó el espejo
+        self.assertIs(ev[-1]["mirrored"], True)          # el gateway se hace responsable y reintenta
+        self.assertEqual(len(self.thread.unmirrored()), 2)
+
     def test_core_returns_persona_and_memory(self):
         self.assertEqual(self.events({"op": "core"})[-1],
                          {"ev": "core", "core": "CORE", "memory": "MEM"})
@@ -184,6 +194,67 @@ class GatewayTest(unittest.TestCase):
             self.assertEqual(len(out), 1, raw)
             self.assertEqual(out[0]["ev"], "error", raw)
         self.assertEqual(self.thread.read(), [])
+
+
+class _FakeJx:
+    """Lo mínimo del módulo ~/bin/jinx que usa JinxBrain."""
+    PREAMBLE = {"or": "PRE-OR", "local": "PRE-LOCAL"}
+    CORE_PATH = "/nonexistent-core"
+    SOUL_PATH = __file__            # cualquier archivo legible
+
+    def __init__(self, or_fails=False):
+        self.probed = 0
+        self.or_fails = or_fails
+
+    def load_synced_memory(self):
+        return "\n[mem]", "ok"
+
+    def get_api_key(self):
+        return "KEY"
+
+    def openrouter_reachable(self, key):
+        self.probed += 1
+        return True
+
+    def stream_openrouter(self, msgs, key):
+        if self.or_fails:
+            raise OSError("sin red")
+        yield "hola "
+        yield "mundo"
+
+    def pick_local_backend(self):
+        pass
+
+    def stream_ollama(self, msgs):
+        yield "<local>"
+
+    def strip_think(self, pieces):
+        return pieces
+
+
+class BrainTest(unittest.TestCase):
+    def test_goes_straight_to_openrouter_without_a_reachability_probe(self):
+        jx = _FakeJx()
+        mode, text = jinx_chat.JinxBrain(jx).reply([{"role": "user", "content": "x"}])
+        self.assertEqual((mode, text), ("or", "hola mundo"))
+        self.assertEqual(jx.probed, 0)
+
+    def test_falls_back_to_local_when_openrouter_fails(self):
+        jx = _FakeJx(or_fails=True)
+        mode, text = jinx_chat.JinxBrain(jx).reply([{"role": "user", "content": "x"}])
+        self.assertEqual((mode, text), ("local", "<local>"))
+
+
+class LazyMirrorTest(unittest.TestCase):
+    def test_building_the_mirror_does_not_touch_the_vault(self):
+        calls = []
+        m = jinx_chat.LazyTelegramMirror(lambda: calls.append("t") or "TOK", lambda: calls.append("c") or "42",
+                                         opener=lambda req, timeout=0: (_ for _ in ()).throw(OSError("x")))
+        self.assertEqual(calls, [])
+        self.assertFalse(m.send("hola"))       # el opener falla, pero ya resolvió secretos
+        self.assertEqual(calls, ["t", "c"])
+        m.send("otra")
+        self.assertEqual(calls, ["t", "c"])    # se resuelven una sola vez
 
 
 class TelegramMirrorTest(unittest.TestCase):

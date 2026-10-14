@@ -72,6 +72,17 @@ class ChatRepositoryTest {
         assertTrue(s.unmirrored().isEmpty()) // the laptop mirrors by itself
     }
 
+    @Test fun enqueueStoresTheUsersLineAtOnceAndAnswerComesLater() {
+        val s = store(); val lap = FakeLaptop()
+        val r = repo(s, lap, emptyList())
+        val line = r.enqueue("hola")
+        assertEquals(listOf(line.id), s.all().map { it.id })      // visible before any brain runs
+        assertEquals(0, lap.sent.size)
+        val res = r.answer(line) as SendResult.Answered
+        assertEquals("desde la laptop", res.line.text)
+        assertEquals(2, s.all().size)
+    }
+
     @Test fun laptopAnswerNotConfirmedAsMirroredStaysQueuedHere() {
         val s = store(); val lap = FakeLaptop().apply { answerMirrored = false }
         repo(s, lap, emptyList()).send("hola")

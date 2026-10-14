@@ -13,9 +13,10 @@ import json
 import os
 import subprocess
 import sys
+import time
 import urllib.request
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from jinx_thread import Thread  # noqa: E402
@@ -35,6 +36,10 @@ class Deps:
     memory_text: str
     secrets: Callable[[], dict]
     base: str
+    # Si está puesto, el espejo a Telegram NO se hace en la petición: se delega (proceso aparte) y la
+    # respuesta sale de inmediato. El gateway sigue siendo responsable: la línea queda mirrored:false
+    # en el hilo y se reintenta en cada op.
+    defer_mirror: Optional[Callable[[], None]] = None
 
 
 def _err(msg):
@@ -74,6 +79,15 @@ def _mirrored(deps, ids):
     return all(by_id.get(i, {}).get("mirrored") for i in ids)
 
 
+def _settle_mirror(deps, ids):
+    """Espeja ahora (síncrono) o delega; devuelve True si el gateway se hace responsable de las líneas."""
+    if deps.defer_mirror is not None:
+        deps.defer_mirror()
+        return True
+    _mirror_pending(deps)
+    return _mirrored(deps, ids)
+
+
 def _send(req, deps):
     text = req.get("text")
     cid = req.get("cid")
@@ -88,10 +102,9 @@ def _send(req, deps):
     with _cid_lock(deps.base, cid):
         cached = deps.thread.answer_for(cid)
         if cached:
-            _mirror_pending(deps)
             yield {"ev": "ack"}
             yield {"ev": "done", "mode": "cached", "text": cached["text"],
-                   "mirrored": _mirrored(deps, ids)}
+                   "mirrored": _settle_mirror(deps, ids)}
             return
         deps.thread.append(src, text, cid=cid)
         yield {"ev": "ack"}
@@ -102,8 +115,7 @@ def _send(req, deps):
             return
         out = (out or "").strip() or "(sin respuesta)"
         line = deps.thread.append("jinx", out, cid=cid)
-        _mirror_pending(deps)
-        yield {"ev": "done", "mode": mode, "text": line["text"], "mirrored": _mirrored(deps, ids)}
+        yield {"ev": "done", "mode": mode, "text": line["text"], "mirrored": _settle_mirror(deps, ids)}
 
 
 def handle(req, deps):
@@ -121,10 +133,14 @@ def handle(req, deps):
             yield _err("merge necesita lines y have")
             return
         added = deps.thread.merge(lines)
-        _mirror_pending(deps)
         sent_ids = {d["id"] for d in lines if isinstance(d, dict) and isinstance(d.get("id"), str)}
-        # Todo lo que el teléfono mandó y que YA está espejado en el hilo (por esta llamada o antes).
-        mirrored_ids = [d["id"] for d in deps.thread.read() if d["id"] in sent_ids and d["mirrored"]]
+        if deps.defer_mirror is not None:
+            deps.defer_mirror()
+            # El gateway ya tiene esas líneas en su hilo y se hace responsable de espejarlas.
+            mirrored_ids = [d["id"] for d in deps.thread.read() if d["id"] in sent_ids]
+        else:
+            _mirror_pending(deps)
+            mirrored_ids = [d["id"] for d in deps.thread.read() if d["id"] in sent_ids and d["mirrored"]]
         yield {"ev": "merged", "added": len(added),
                "items": deps.thread.since({h for h in have if isinstance(h, str)}),
                "mirrored_ids": mirrored_ids}
@@ -167,9 +183,11 @@ def run_line(raw, deps):
 class TelegramMirror:
     def __init__(self, token, chat, opener=urllib.request.urlopen):
         self.token, self.chat, self.opener = token, chat, opener
+        self.last_error = ""
 
     def send(self, text):
         if not self.token or not self.chat or self.opener is None:
+            self.last_error = "sin token o chat"
             return False
         data = json.dumps({"chat_id": str(self.chat), "text": text[:TG_MAX]}).encode()
         req = urllib.request.Request(
@@ -177,9 +195,26 @@ class TelegramMirror:
             headers={"Content-Type": "application/json"})
         try:
             with self.opener(req, timeout=15) as r:
-                return r.status == 200
-        except Exception:  # noqa: BLE001 - sin red, 4xx, timeout: se reintenta luego
+                ok = r.status == 200
+                self.last_error = "" if ok else "HTTP %s" % r.status
+                return ok
+        except Exception as e:  # noqa: BLE001 - sin red, 4xx, timeout: se reintenta luego
+            self.last_error = type(e).__name__ + ": " + str(e).replace(self.token, "<token>")
             return False
+
+
+class LazyTelegramMirror(TelegramMirror):
+    """Igual que TelegramMirror, pero token y chat se piden a la bóveda sólo al primer envío real."""
+
+    def __init__(self, token_fn, chat_fn, opener=urllib.request.urlopen):
+        super().__init__("", "", opener)
+        self._token_fn, self._chat_fn, self._resolved = token_fn, chat_fn, False
+
+    def send(self, text):
+        if not self._resolved:
+            self.token, self.chat = self._token_fn() or "", self._chat_fn() or ""
+            self._resolved = True
+        return super().send(text)
 
 
 def _load_jinx():
@@ -224,7 +259,9 @@ class JinxBrain:
 
     def reply(self, messages):
         jx = self.jx
-        mode = "or" if (self.key and jx.openrouter_reachable(self.key)) else "local"
+        # Sin sonda previa de alcanzabilidad: era una petición extra por mensaje; si OpenRouter falla,
+        # el except de abajo ya cae al modelo local.
+        mode = "or" if self.key else "local"
         msgs = [{"role": "system", "content": self.system(mode)}] + messages
         try:
             if mode == "or":
@@ -239,21 +276,73 @@ class JinxBrain:
             return "local", "".join(jx.strip_think(jx.stream_ollama(msgs)))
 
 
-def build_real_deps(base=BASE):
+def _spawn_flush_mirror():
+    """Lanza `jinx-chat --flush-mirror` desacoplado: sobrevive al cierre de la sesión ssh del teléfono."""
+    try:
+        subprocess.Popen(
+            [sys.executable, os.path.abspath(__file__), "--flush-mirror"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True, close_fds=True)
+    except OSError:
+        pass  # las líneas siguen mirrored:false y se reintentan en la próxima op
+
+
+def build_real_deps(base=BASE, defer=False):
     jx = _load_jinx()
-    token = os.environ.get("JINX_TG_TOKEN") or os.environ.get("TELEGRAM_BOT_TOKEN") \
-        or _vault_get(jx, "TELEGRAM_BOT_TOKEN")
-    chat = os.environ.get("JINX_TG_CHAT") or os.environ.get("TELEGRAM_ALLOWED_CHAT") \
-        or _vault_get(jx, "TELEGRAM_ALLOWED_CHAT")
+    cache = {}
+
+    def secret(env_names, vault_key):
+        if vault_key not in cache:
+            cache[vault_key] = next((os.environ[e] for e in env_names if os.environ.get(e)), "") \
+                or _vault_get(jx, vault_key)
+        return cache[vault_key]
+
+    def token():
+        return secret(("JINX_TG_TOKEN", "TELEGRAM_BOT_TOKEN"), "TELEGRAM_BOT_TOKEN")
+
+    def chat():
+        return secret(("JINX_TG_CHAT", "TELEGRAM_ALLOWED_CHAT"), "TELEGRAM_ALLOWED_CHAT")
+
     brain = JinxBrain(jx)
     memory = jx.load_synced_memory()[0]
-    return Deps(Thread(base), brain, TelegramMirror(token, chat),
+    thread = Thread(base)
+
+    def defer_if_needed():
+        if thread.unmirrored():
+            _spawn_flush_mirror()
+
+    return Deps(thread, brain, LazyTelegramMirror(token, chat),
                 brain.core, memory,
-                lambda: {"openrouter_key": brain.key or "", "telegram_token": token, "chat": chat},
-                base)
+                lambda: {"openrouter_key": brain.key or "", "telegram_token": token(), "chat": chat()},
+                base, defer_mirror=defer_if_needed if defer else None)
+
+
+def flush_mirror_main():
+    """`jinx-chat --flush-mirror`: repite a Telegram lo que quedó pendiente (corre desacoplado)."""
+    log_path = os.path.join(BASE, "gateway.log")
+
+    def log(msg):
+        try:
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write("%s flush-mirror: %s\n" % (time.strftime("%Y-%m-%dT%H:%M:%S"), msg))
+        except OSError:
+            pass
+
+    try:
+        deps = build_real_deps(defer=False)
+        pending = len(deps.thread.unmirrored())
+        done = _mirror_pending(deps)
+        if len(done) < pending:
+            log("espejadas %d de %d; último error: %s" % (len(done), pending, getattr(deps.mirror, "last_error", "?")))
+    except Exception as e:  # noqa: BLE001 - se reintenta en la próxima op
+        log("excepción: %s: %s" % (type(e).__name__, e))
+        return 1
+    return 0
 
 
 def main(stdin=sys.stdin, stdout=sys.stdout):
+    if "--flush-mirror" in sys.argv[1:]:
+        return flush_mirror_main()
     raw = stdin.readline()
     try:
         req = json.loads(raw) if raw.strip() else {}
@@ -262,7 +351,7 @@ def main(stdin=sys.stdin, stdout=sys.stdout):
     # Sólo se construye el cerebro real si la op lo necesita (history no).
     needs_real = isinstance(req, dict) and req.get("op") in ("send", "core", "provision", "merge")
     try:
-        deps = build_real_deps() if needs_real else Deps(
+        deps = build_real_deps(defer=True) if needs_real else Deps(
             Thread(BASE), None, TelegramMirror("", ""), "", "", dict, BASE)
     except Exception as e:  # noqa: BLE001
         stdout.write(json.dumps(_err("gateway sin cerebro: %s" % e)) + "\n")

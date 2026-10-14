@@ -28,12 +28,20 @@ object BuiltInPersona {
     )
 }
 
+private const val DAY_MS = 24 * 60 * 60 * 1000L
+
 /** The cached copy, in the app's private folder. A bad or empty file is never worse than the built-in. */
 class PersonaStore(private val file: File) {
     fun load(): Persona = runCatching {
         val o = JSONObject(file.readText())
         Persona(o.getString("core"), o.optString("memory")).takeIf { it.core.isNotBlank() }
     }.getOrNull() ?: BuiltInPersona.persona
+
+    /** How long ago the cached copy was saved; [Long.MAX_VALUE] if there is none. */
+    fun ageMs(now: Long = System.currentTimeMillis()): Long =
+        if (file.exists()) (now - file.lastModified()).coerceAtLeast(0) else Long.MAX_VALUE
+
+    fun isStale(now: Long = System.currentTimeMillis(), maxAgeMs: Long = DAY_MS): Boolean = ageMs(now) > maxAgeMs
 
     fun save(p: Persona) {
         if (p.core.isBlank()) return

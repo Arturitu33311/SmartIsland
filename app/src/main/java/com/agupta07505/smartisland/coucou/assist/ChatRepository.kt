@@ -39,16 +39,19 @@ class ChatRepository(
     private val clock: () -> Double = { System.currentTimeMillis() / 1000.0 },
     private val newCid: () -> String = { UUID.randomUUID().toString() },
 ) {
-    fun send(text: String): SendResult {
+    /** Stores what the user typed at once (so the screen can show it) without asking anyone yet. */
+    fun enqueue(text: String): ChatLine {
         val cid = newCid()
-        val user = store.append(ChatLine("$cid:$deviceId", clock(), deviceId, text, cid, false))
-        return answer(user)
+        return store.append(ChatLine("$cid:$deviceId", clock(), deviceId, text, cid, false))
     }
+
+    fun send(text: String): SendResult = answer(enqueue(text))
 
     /** Asks again for what was typed and never answered (a model came back, or the laptop did). */
     fun retryPending(): List<SendResult> = store.pending().map { answer(it) }
 
-    private fun answer(user: ChatLine): SendResult {
+    /** Gets an answer for a line already in the thread: the laptop first, then this phone's own brains. */
+    fun answer(user: ChatLine): SendResult {
         val cid = user.cid ?: return SendResult.Pending("sin cid")
         store.answerFor(cid)?.let { return SendResult.Answered(it, Via.Laptop) }
         laptop?.let { api ->

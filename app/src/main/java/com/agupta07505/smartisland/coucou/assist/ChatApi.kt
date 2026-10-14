@@ -5,6 +5,7 @@
 package com.agupta07505.smartisland.coucou.assist
 
 import android.content.Context
+import java.io.Closeable
 import com.agupta07505.smartisland.coucou.phone.Ssh
 import com.agupta07505.smartisland.coucou.phone.SshException
 import com.agupta07505.smartisland.coucou.phone.SshProfile
@@ -17,24 +18,42 @@ interface ChatApi {
     fun provision(): ChatEvent.Secrets
 }
 
-/** The real thing: one ssh command (`jinx-chat`) per request, with the phone's own key. */
+/**
+ * The real thing: one ssh command (`jinx-chat`) per request, with the phone's own key. The connection is
+ * kept between requests (logging in costs more than the request itself) and replaced when it has gone stale.
+ */
 class LaptopChatApi(
     private val context: Context,
     private val profile: () -> SshProfile,
-) : ChatApi {
+) : ChatApi, Closeable {
+    private var conn: Ssh.Connection? = null
+
+    @Synchronized
     private fun ask(request: String, timeoutSec: Long): String {
-        val conn = try {
-            Ssh.open(context, profile(), connectTimeoutMs = PROBE_MS)
-        } catch (e: SshException) {
-            throw ChatException(e.message ?: "la laptop no responde")
+        var failure: String? = null
+        // Twice: a kept connection may have died while the phone slept; the second try opens a fresh one.
+        // Resending is safe, the gateway answers the same cid once.
+        repeat(2) {
+            val c = try {
+                conn?.takeIf { it.connected } ?: Ssh.open(context, profile(), connectTimeoutMs = PROBE_MS).also { conn = it }
+            } catch (e: SshException) {
+                throw ChatException(e.message ?: "la laptop no responde")
+            }
+            try {
+                return c.exec("jinx-chat", request + "\n", timeoutSec)
+            } catch (e: Exception) {
+                failure = e.message
+                runCatching { c.close() }
+                conn = null
+            }
         }
-        try {
-            return conn.exec("jinx-chat", request + "\n", timeoutSec)
-        } catch (e: Exception) {
-            throw ChatException(e.message ?: "la laptop no responde")
-        } finally {
-            conn.close()
-        }
+        throw ChatException(failure ?: "la laptop no responde")
+    }
+
+    @Synchronized
+    override fun close() {
+        runCatching { conn?.close() }
+        conn = null
     }
 
     override fun send(text: String, cid: String, src: String) =

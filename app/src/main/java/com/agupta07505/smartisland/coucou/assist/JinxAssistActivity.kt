@@ -57,8 +57,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 
 data class AssistUi(
     val lines: List<ChatLine> = emptyList(),
@@ -83,54 +85,78 @@ class AssistModel(app: Application) : AndroidViewModel(app) {
     private val _ui = MutableStateFlow(AssistUi(lines = store.all()))
     val ui: StateFlow<AssistUi> = _ui.asStateFlow()
 
-    init {
-        // Opening the panel: bring the laptop's lines and persona if it is there, then retry what was left.
+    /** Only one background round with the laptop at a time (opening the panel again must not stack them). */
+    private val warming = AtomicBoolean(false)
+
+    /** Every write goes through [update], so two coroutines can never overwrite each other's field. */
+    private fun refresh(change: (AssistUi) -> AssistUi = { it }) {
+        _ui.update { change(it).copy(lines = store.all()) }
+    }
+
+    /**
+     * The panel came to the front (first time, or again while the activity was alive): bring the laptop's
+     * lines, retry what was left pending and repeat unmirrored lines to Telegram. Never blocks typing.
+     */
+    fun onOpen() {
+        refresh()
+        if (!warming.compareAndSet(false, true)) return
         viewModelScope.launch(Dispatchers.IO) {
-            runCatching { refreshPersona(laptopApi, personas) }
-            repo.sync()
-            repo.retryPending()
-            repo.flushMirror()
-            _ui.value = _ui.value.copy(lines = store.all())
+            try {
+                if (personas.isStale()) runCatching { refreshPersona(laptopApi, personas) }
+                repo.sync()
+                refresh()
+                repo.retryPending()
+                repo.flushMirror()
+            } finally {
+                warming.set(false)
+                refresh()
+            }
         }
     }
 
     fun send(text: String) {
         val t = text.trim()
         if (t.isEmpty() || _ui.value.busy) return
-        _ui.value = _ui.value.copy(busy = true, notice = "")
+        _ui.update { it.copy(busy = true, notice = "") }
         viewModelScope.launch(Dispatchers.IO) {
-            val r = repo.send(t)
-            _ui.value = when (r) {
-                is SendResult.Answered -> _ui.value.copy(
-                    lines = store.all(), busy = false,
-                    badge = when (r.via) {
-                        Via.Laptop -> "laptop"
-                        Via.Cloud -> "este teléfono · nube"
-                        Via.Local -> "este teléfono · sin conexión"
-                    },
-                )
-                is SendResult.Pending -> _ui.value.copy(
-                    lines = store.all(), busy = false,
-                    notice = "Sin respuesta: ${r.reason}. Queda pendiente y se reintenta al abrir.",
-                )
+            // What the user typed shows up at once; the answer arrives when some brain has it.
+            val line = repo.enqueue(t)
+            refresh()
+            val r = repo.answer(line)
+            refresh { ui ->
+                when (r) {
+                    is SendResult.Answered -> ui.copy(
+                        busy = false,
+                        badge = when (r.via) {
+                            Via.Laptop -> "laptop"
+                            Via.Cloud -> "este teléfono · nube"
+                            Via.Local -> "este teléfono · sin conexión"
+                        },
+                    )
+                    is SendResult.Pending -> ui.copy(
+                        busy = false,
+                        notice = "Sin respuesta: ${r.reason}. Queda pendiente y se reintenta al abrir.",
+                    )
+                }
             }
         }
     }
 
-    /** Brings the laptop's lines and persona, retries what is pending and repeats unmirrored lines to Telegram. */
+    /** Explicit sync: always refreshes the persona, then the same round as opening the panel. */
     fun syncNow() {
         if (_ui.value.busy) return
-        _ui.value = _ui.value.copy(busy = true, notice = "")
+        _ui.update { it.copy(busy = true, notice = "") }
         viewModelScope.launch(Dispatchers.IO) {
             val persona = runCatching { refreshPersona(laptopApi, personas) }
             val added = repo.sync()
             repo.retryPending()
             repo.flushMirror()
-            _ui.value = _ui.value.copy(
-                lines = store.all(),
-                busy = false,
-                notice = if (persona.isSuccess) "Sincronizado ($added mensajes nuevos)." else "La laptop no responde; sigo con lo que tengo.",
-            )
+            refresh {
+                it.copy(
+                    busy = false,
+                    notice = if (persona.isSuccess) "Sincronizado ($added mensajes nuevos)." else "La laptop no responde; sigo con lo que tengo.",
+                )
+            }
         }
     }
 
@@ -143,8 +169,13 @@ class AssistModel(app: Application) : AndroidViewModel(app) {
             } catch (e: ChatException) {
                 "No se pudo: ${e.message}"
             }
-            _ui.value = _ui.value.copy(notice = msg)
+            refresh { it.copy(notice = msg) }
         }
+    }
+
+    override fun onCleared() {
+        laptopApi.close()
+        super.onCleared()
     }
 }
 
@@ -160,6 +191,11 @@ class JinxAssistActivity : ComponentActivity() {
                 AssistScreen(model)
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        model.onOpen()
     }
 }
 
