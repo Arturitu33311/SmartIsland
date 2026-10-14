@@ -1,0 +1,10 @@
+[Unit]
+Description=Cada 2 min reintenta entregas fallidas a Telegram
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target

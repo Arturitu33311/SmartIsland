@@ -1,0 +1,8 @@
+[Unit]
+Description=Reset por tiempo (idle/04:00) de sesiones de gateway de Hermes
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/alan/.hermes/hermes-agent
+ExecStart=/home/alan/.hermes/hermes-agent/venv/bin/python /home/alan/.hermes/scripts/hermes_session_time_reset.py
+TimeoutStartSec=60

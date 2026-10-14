@@ -1,0 +1,10 @@
+[Unit]
+Description=Cada 5 min aplica el reset por tiempo a sesiones de Hermes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,7 @@
+[Unit]
+Description=Reintenta respuestas de Hermes que no llegaron a Telegram (send_path_degraded)
+
+[Service]
+Type=oneshot
+ExecStart=/home/alan/.hermes/hermes-agent/venv/bin/python /home/alan/.hermes/scripts/hermes_telegram_retry.py
+TimeoutStartSec=120
