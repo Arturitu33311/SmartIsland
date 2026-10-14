@@ -32,6 +32,12 @@ class ConnectionPolicyTest {
         assertTrue(ConnectionPolicy.reusable(p, p, t0, lastUsed = t0, now = t0 + ConnectionPolicy.IDLE_MS - 1))
     }
 
+    @Test fun aClockThatWentBackwardsNeverKeepsAConnectionAlive() {
+        // now is before it was opened / last used: the age cannot be trusted, so it is not reusable
+        assertFalse(ConnectionPolicy.reusable(p, p, openedAt = t0, lastUsed = t0, now = t0 - 1))
+        assertFalse(ConnectionPolicy.reusable(p, p, openedAt = t0 - 500, lastUsed = t0 + 10_000, now = t0))
+    }
+
     @Test fun olderThanTheMaximumAgeDropsItEvenIfBusy() {
         val now = t0 + ConnectionPolicy.MAX_AGE_MS + 1
         assertFalse(ConnectionPolicy.reusable(p, p, openedAt = t0, lastUsed = now - 1, now = now))

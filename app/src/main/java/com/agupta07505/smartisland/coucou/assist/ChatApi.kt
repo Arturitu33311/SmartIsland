@@ -5,6 +5,8 @@
 package com.agupta07505.smartisland.coucou.assist
 
 import android.content.Context
+import android.os.SystemClock
+import android.util.Log
 import java.io.Closeable
 import com.agupta07505.smartisland.coucou.phone.Ssh
 import com.agupta07505.smartisland.coucou.phone.SshException
@@ -28,11 +30,14 @@ object ConnectionPolicy {
     const val IDLE_MS = 90_000L
     const val MAX_AGE_MS = 5 * 60_000L
 
-    fun reusable(openedFor: SshProfile, current: SshProfile, openedAt: Long, lastUsed: Long, now: Long): Boolean =
-        current.paired &&
+    fun reusable(openedFor: SshProfile, current: SshProfile, openedAt: Long, lastUsed: Long, now: Long): Boolean {
+        // A clock that went backwards makes the ages meaningless: never keep a connection on that evidence.
+        if (now < openedAt || now < lastUsed) return false
+        return current.paired &&
             openedFor == current &&
             now - lastUsed <= IDLE_MS &&
             now - openedAt <= MAX_AGE_MS
+    }
 }
 
 /**
@@ -48,30 +53,43 @@ class LaptopChatApi(
     private var openedAt = 0L
     private var lastUsed = 0L
 
+    private fun ask(request: String, timeoutSec: Long): String = askLocked(request, timeoutSec, SystemClock.elapsedRealtime())
+
     @Synchronized
-    private fun ask(request: String, timeoutSec: Long): String {
+    private fun askLocked(request: String, timeoutSec: Long, queuedAt: Long): String {
+        val startedAt = SystemClock.elapsedRealtime()
+        val op = runCatching { org.json.JSONObject(request).optString("op") }.getOrDefault("?")
+        var connectMs = 0L
         var failure: String? = null
         // Twice: a kept connection may have died while the phone slept; the second try opens a fresh one.
         // Resending is safe, the gateway answers the same cid once.
         repeat(2) {
-            val now = System.currentTimeMillis()
+            val now = SystemClock.elapsedRealtime()
             val current = profile()
             val kept = conn
             if (kept != null && !(kept.connected && openedFor?.let { ConnectionPolicy.reusable(it, current, openedAt, lastUsed, now) } == true)) {
                 dropConnection()
             }
             val c = try {
-                conn ?: Ssh.open(context, current, connectTimeoutMs = PROBE_MS).also {
-                    conn = it
-                    openedFor = current
-                    openedAt = now
+                conn ?: run {
+                    val t = SystemClock.elapsedRealtime()
+                    Ssh.open(context, current, connectTimeoutMs = PROBE_MS).also {
+                        conn = it
+                        openedFor = current
+                        openedAt = now
+                        connectMs = SystemClock.elapsedRealtime() - t
+                    }
                 }
             } catch (e: SshException) {
                 throw ChatException(e.message ?: "la laptop no responde")
             }
             try {
+                val t = SystemClock.elapsedRealtime()
                 val out = c.exec("jinx-chat", request + "\n", timeoutSec)
-                lastUsed = System.currentTimeMillis()
+                lastUsed = SystemClock.elapsedRealtime()
+                val end = SystemClock.elapsedRealtime()
+                // Where a message's wait goes: queued behind another request, logging in, or the gateway.
+                Log.i("JinxChat", "op=$op wait=${startedAt - queuedAt}ms connect=${connectMs}ms exec=${end - t}ms total=${end - queuedAt}ms")
                 return out
             } catch (e: Exception) {
                 failure = e.message

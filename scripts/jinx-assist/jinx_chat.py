@@ -368,15 +368,26 @@ def main(stdin=sys.stdin, stdout=sys.stdout):
         req = {}
     # Sólo se construye el cerebro real si la op lo necesita (history no).
     needs_real = isinstance(req, dict) and req.get("op") in ("send", "core", "provision", "merge")
+    t_start = time.time()
     try:
         deps = build_real_deps(defer=True) if needs_real else Deps(
             Thread(BASE), None, TelegramMirror("", ""), "", "", dict, BASE)
     except Exception as e:  # noqa: BLE001
         stdout.write(json.dumps(_err("gateway sin cerebro: %s" % e)) + "\n")
         return 0
+    t_deps = time.time()
     for ev in run_line(raw, deps):
         stdout.write(json.dumps(ev, ensure_ascii=False) + "\n")
         stdout.flush()
+    t_end = time.time()
+    # Tiempos por petición (sin contenido): sirven para ver dónde se va la espera de un mensaje.
+    try:
+        op = req.get("op", "?") if isinstance(req, dict) else "?"
+        append_log(os.path.join(BASE, "gateway.log"),
+                   "%s op=%s deps=%.2fs run=%.2fs total=%.2fs" % (
+                       time.strftime("%Y-%m-%dT%H:%M:%S"), op, t_deps - t_start, t_end - t_deps, t_end - t_start))
+    except OSError:
+        pass
     return 0
 
 
