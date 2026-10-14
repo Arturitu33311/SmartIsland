@@ -245,6 +245,109 @@ class BrainTest(unittest.TestCase):
         self.assertEqual((mode, text), ("local", "<local>"))
 
 
+class HermesBrainTest(unittest.TestCase):
+    def test_sends_only_the_last_user_message_and_returns_the_real_jinx_answer(self):
+        seen = []
+
+        def runner(payload):
+            seen.append(payload)
+            return {"ev": "done", "text": "respuesta real", "session_id": "s"}
+
+        mode, text = jinx_chat.HermesBrain(runner).reply([
+            {"role": "user", "content": "uno"}, {"role": "assistant", "content": "dos"},
+            {"role": "user", "content": "tres"}])
+        self.assertEqual((mode, text), ("hermes", "respuesta real"))
+        self.assertEqual(seen, [{"op": "send", "text": "tres"}])
+
+    def test_an_error_event_or_a_dead_runner_raises_so_the_chain_can_fall_back(self):
+        with self.assertRaises(RuntimeError):
+            jinx_chat.HermesBrain(lambda p: {"ev": "error", "msg": "sin sesión"}).reply([{"role": "user", "content": "x"}])
+
+        def boom(p):
+            raise OSError("ssh cayó")
+
+        with self.assertRaises(OSError):
+            jinx_chat.HermesBrain(boom).reply([{"role": "user", "content": "x"}])
+
+    def test_history_returns_items_or_nothing(self):
+        h = jinx_chat.HermesBrain(lambda p: {"ev": "history", "items": [{"id": "1", "role": "user", "text": "a", "ts": 1.0}]})
+        self.assertEqual(len(h.history(10)), 1)
+        self.assertEqual(jinx_chat.HermesBrain(lambda p: {"ev": "error", "msg": "x"}).history(10), [])
+
+
+class ChainBrainTest(unittest.TestCase):
+    class Ok:
+        def __init__(self, tag):
+            self.tag, self.calls = tag, 0
+
+        def reply(self, messages):
+            self.calls += 1
+            return self.tag, "de " + self.tag
+
+    class Bad:
+        def reply(self, messages):
+            raise RuntimeError("cae")
+
+    def test_first_that_answers_wins_and_the_rest_are_not_called(self):
+        a, b = self.Ok("a"), self.Ok("b")
+        self.assertEqual(jinx_chat.ChainBrain([a, b]).reply([]), ("a", "de a"))
+        self.assertEqual(b.calls, 0)
+
+    def test_falls_back_in_order(self):
+        b = self.Ok("b")
+        self.assertEqual(jinx_chat.ChainBrain([self.Bad(), b]).reply([]), ("b", "de b"))
+
+    def test_all_failing_raises_the_last_error(self):
+        with self.assertRaises(RuntimeError):
+            jinx_chat.ChainBrain([self.Bad(), self.Bad()]).reply([])
+
+
+class HermesHistoryMergeTest(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.thread = Thread(self.dir.name)
+        items = [
+            {"id": "10", "role": "user", "text": "hola desde telegram", "ts": 100.0},
+            {"id": "11", "role": "assistant", "text": "qué onda", "ts": 101.0},
+            {"id": "12", "role": "user", "text": "desde el teléfono", "ts": 200.0},
+            {"id": "13", "role": "assistant", "text": "te oigo", "ts": 201.0},
+        ]
+        self.hermes = type("H", (), {"history": lambda s, n=40: items})()
+        self.deps = Deps(self.thread, None, FakeMirror(), "", "", dict, self.dir.name, hermes=self.hermes)
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def test_history_brings_the_telegram_conversation_and_skips_what_the_phone_already_has(self):
+        self.thread.append("s22", "desde el teléfono", cid="c1", ts=200.0)
+        self.thread.append("jinx", "te oigo", cid="c1", ts=201.0)
+        ev = list(handle({"op": "history", "n": 50}, self.deps))[0]
+        texts = [(d["src"], d["text"]) for d in ev["items"]]
+        self.assertIn(("tg", "hola desde telegram"), texts)
+        self.assertIn(("jinx", "qué onda"), texts)
+        self.assertEqual(sum(1 for _, t in texts if t == "desde el teléfono"), 1)   # no duplicate
+        self.assertEqual(sum(1 for _, t in texts if t == "te oigo"), 1)
+
+    def test_pulling_twice_adds_nothing_new(self):
+        list(handle({"op": "history", "n": 50}, self.deps))
+        n = len(self.thread.read())
+        list(handle({"op": "history", "n": 50}, self.deps))
+        self.assertEqual(len(self.thread.read()), n)
+
+    def test_imported_lines_are_marked_mirrored_so_they_are_not_echoed_to_telegram(self):
+        list(handle({"op": "history", "n": 50}, self.deps))
+        self.assertEqual(self.thread.unmirrored(), [])
+
+    def test_a_dead_hermes_does_not_break_history(self):
+        def boom(s, n=40):
+            raise OSError("ssh cayó")
+
+        self.deps.hermes = type("H", (), {"history": boom})()
+        self.thread.append("tg", "local", ts=1.0, mirrored=True)
+        ev = list(handle({"op": "history", "n": 10}, self.deps))[0]
+        self.assertEqual([d["text"] for d in ev["items"]], ["local"])
+
+
 class RedactionTest(unittest.TestCase):
     TOKEN = "6528281557:AAH_exampleExampleExampleExample-123"
 

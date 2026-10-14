@@ -41,6 +41,8 @@ class Deps:
     # respuesta sale de inmediato. El gateway sigue siendo responsable: la línea queda mirrored:false
     # en el hilo y se reintenta en cada op.
     defer_mirror: Optional[Callable[[], None]] = None
+    # La Jinx real (Hermes): se usa para mostrar en el hilo lo hablado por Telegram. None = sin Hermes.
+    hermes: Optional[object] = None
 
 
 _TOKEN_RE = re.compile(r"(?:bot)?\d{6,}(?::|%3A)[A-Za-z0-9_-]{20,}", re.IGNORECASE)
@@ -107,6 +109,27 @@ def _settle_mirror(deps, ids):
     return _mirrored(deps, ids)
 
 
+def _pull_hermes(deps):
+    """Mezcla en el hilo lo hablado en la sesión de Telegram de Hermes (lo que no está ya). Nunca falla."""
+    if deps.hermes is None:
+        return 0
+    try:
+        items = deps.hermes.history(40)
+    except Exception:  # noqa: BLE001 - Hermes caído: el hilo local sigue sirviendo
+        return 0
+    known = {("jinx" if d["src"] == "jinx" else "user", d["text"].strip()) for d in deps.thread.read()}
+    incoming = []
+    for m in items:
+        role = "jinx" if m.get("role") == "assistant" else "user"
+        text = str(m.get("text", ""))
+        if not text.strip() or (role, text.strip()) in known:
+            continue
+        src = "jinx" if role == "jinx" else "tg"
+        incoming.append({"id": "h%s:%s" % (m.get("id"), src), "ts": float(m.get("ts") or 0), "src": src,
+                         "text": text, "cid": None, "mirrored": True})
+    return len(deps.thread.merge(incoming)) if incoming else 0
+
+
 def _send(req, deps):
     text = req.get("text")
     cid = req.get("cid")
@@ -144,6 +167,7 @@ def handle(req, deps):
     elif op == "history":
         n = req.get("n", 40)
         n = n if isinstance(n, int) and 0 < n <= 500 else 40
+        _pull_hermes(deps)
         yield {"ev": "history", "items": deps.thread.read()[-n:]}
     elif op == "merge":
         lines = req.get("lines")
@@ -152,6 +176,7 @@ def handle(req, deps):
             yield _err("merge necesita lines y have")
             return
         added = deps.thread.merge(lines)
+        _pull_hermes(deps)
         sent_ids = {d["id"] for d in lines if isinstance(d, dict) and isinstance(d.get("id"), str)}
         if deps.defer_mirror is not None:
             deps.defer_mirror()
@@ -261,6 +286,59 @@ def _read(path):
         return f.read()
 
 
+HERMES_SSH = os.environ.get("JINX_HERMES_SSH", "server")
+HERMES_CMD = os.environ.get(
+    "JINX_HERMES_CMD",
+    "/home/alan/.hermes/hermes-agent/venv/bin/python /home/alan/.hermes/scripts/jinx_hermes_chat.py")
+
+
+def ssh_runner(payload, timeout=85):
+    """Una petición al puente de Hermes por ssh; devuelve el evento JSON o lanza si no hay respuesta."""
+    p = subprocess.run(
+        ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=6", HERMES_SSH, HERMES_CMD],
+        input=json.dumps(payload) + "\n", capture_output=True, text=True, timeout=timeout)
+    lines = [ln for ln in p.stdout.splitlines() if ln.strip()]
+    if not lines:
+        raise RuntimeError("Hermes no respondió (%s)" % (p.stderr.strip().splitlines() or ["sin salida"])[-1][:80])
+    return json.loads(lines[-1])
+
+
+class HermesBrain:
+    """La Jinx real, con su memoria, sus herramientas y la conversación de Telegram."""
+
+    def __init__(self, runner=ssh_runner):
+        self.runner = runner
+
+    def reply(self, messages):
+        user = next((m["content"] for m in reversed(messages) if m.get("role") == "user"), None)
+        if not user:
+            raise RuntimeError("no hay mensaje al que contestar")
+        ev = self.runner({"op": "send", "text": user})
+        if ev.get("ev") != "done":
+            raise RuntimeError(ev.get("msg") or "Hermes no contestó")
+        return "hermes", ev["text"]
+
+    def history(self, n=40):
+        ev = self.runner({"op": "history", "n": n})
+        return ev.get("items", []) if ev.get("ev") == "history" else []
+
+
+class ChainBrain:
+    """Prueba cerebros en orden; el primero que contesta gana. Si todos fallan, lanza el último error."""
+
+    def __init__(self, brains):
+        self.brains = brains
+
+    def reply(self, messages):
+        last = RuntimeError("sin cerebros")
+        for b in self.brains:
+            try:
+                return b.reply(messages)
+            except Exception as e:  # noqa: BLE001
+                last = e
+        raise last
+
+
 class JinxBrain:
     """Mismo cerebro de respaldo que el relay: OpenRouter, si no, Ollama local."""
 
@@ -322,7 +400,9 @@ def build_real_deps(base=BASE, defer=False):
     def chat():
         return secret(("JINX_TG_CHAT", "TELEGRAM_ALLOWED_CHAT"), "TELEGRAM_ALLOWED_CHAT")
 
-    brain = JinxBrain(jx)
+    jinx_brain = JinxBrain(jx)
+    hermes = None if os.environ.get("JINX_NO_HERMES") else HermesBrain()
+    brain = ChainBrain([hermes, jinx_brain]) if hermes else jinx_brain
     memory = jx.load_synced_memory()[0]
     thread = Thread(base)
 
@@ -331,9 +411,9 @@ def build_real_deps(base=BASE, defer=False):
             _spawn_flush_mirror()
 
     return Deps(thread, brain, LazyTelegramMirror(token, chat),
-                brain.core, memory,
-                lambda: {"openrouter_key": brain.key or "", "telegram_token": token(), "chat": chat()},
-                base, defer_mirror=defer_if_needed if defer else None)
+                jinx_brain.core, memory,
+                lambda: {"openrouter_key": jinx_brain.key or "", "telegram_token": token(), "chat": chat()},
+                base, defer_mirror=defer_if_needed if defer else None, hermes=hermes)
 
 
 def flush_mirror_main():
