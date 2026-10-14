@@ -106,11 +106,11 @@
     return HINTS.has(top.mood) ? top.mood : "Happy";
   }
 
-  /** forced > no es mío (calmo) > mensajes sin leer > emoción/noche. */
+  /** forced > no es mío (descansa) > mensajes sin leer > emoción/noche. */
   function decideMood(s) {
     if (s.forced && (!s.forced.until || s.forced.until > s.now)) return s.forced.mood;
+    if (!s.mine) return "Sleepy";
     const calm = isNight(s.hour) ? "Sleepy" : emotionMood(s.emotion);
-    if (!s.mine) return calm === "Happy" ? "Idle" : calm;
     return messageMood(s.unread) || calm;
   }
 

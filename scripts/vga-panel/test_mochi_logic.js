@@ -56,8 +56,9 @@ test("mood decision: a forced mood wins, then ownership, then messages, then the
   assert.equal(L.decideMood({ ...base, unread: [{ kind: "warn" }] }), "Surprised");
   assert.equal(L.decideMood({ ...base, unread: [{ kind: "info", mood: "Celebrating" }] }), "Celebrating");
   assert.equal(L.decideMood({ ...base, unread: [{ kind: "info" }] }), "Happy");
-  // not mine: the other device shows the news, this one stays calm
-  assert.equal(L.decideMood({ ...base, mine: false, unread: [{ kind: "alert" }] }), "Idle");
+  // not mine: another device has Alan's attention, so this panel rests (it only wakes as the failsafe)
+  assert.equal(L.decideMood({ ...base, mine: false, unread: [{ kind: "alert" }] }), "Sleepy");
+  assert.equal(L.decideMood({ ...base, mine: false, emotion: { affection: 90, patience: 80, trust: 85 } }), "Sleepy");
   // forced (e.g. happy for a few seconds after an ack) beats everything while it lasts
   assert.equal(L.decideMood({ ...base, forced: { mood: "Happy", until: 2000 }, unread: [{ kind: "alert" }] }), "Happy");
   assert.equal(L.decideMood({ ...base, forced: { mood: "Happy", until: 500 } }), "Idle");   // expired
