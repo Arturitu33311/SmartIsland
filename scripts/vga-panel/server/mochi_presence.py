@@ -201,6 +201,11 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._host_ok():
             return
+        # CSRF: el loopback se acepta sin llave, asi que una pagina web que haga un POST "simple" a 127.0.0.1
+        # pasaria. Los navegadores siempre mandan Origin en un POST cross-site; los clientes propios no.
+        origin = self.headers.get("Origin")
+        if origin is not None and origin not in PANEL_ORIGINS:
+            return self._send(403, {"error": "origen no permitido"})
         if not self._authed():
             return self._send(403, {"error": "forbidden"})
         now = time.time()

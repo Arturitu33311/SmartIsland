@@ -138,6 +138,22 @@ class HostAndCorsTest(unittest.TestCase):
         _, allow = self.request("127.0.0.1:%d" % self.port)          # clientes que no son navegador
         self.assertIsNone(allow)
 
+    def post_with(self, headers):
+        import http.client
+        c = http.client.HTTPConnection("127.0.0.1", self.port)
+        c.request("POST", "/api/mochi/message", body=b'{"text":"hola","kind":"info"}',
+                  headers={"Host": "127.0.0.1:%d" % self.port, **headers})
+        return c.getresponse().status
+
+    def test_a_cross_site_post_is_refused_even_from_loopback(self):
+        # CSRF: una pagina web puede mandar un POST "simple" (text/plain) a 127.0.0.1; el navegador siempre manda Origin.
+        self.assertEqual(self.post_with({"Origin": "https://evil.example", "Content-Type": "text/plain"}), 403)
+        self.assertEqual(len(self.m.state["inbox"]), 0)
+
+    def test_the_panel_origin_and_non_browser_clients_can_post(self):
+        self.assertEqual(self.post_with({"Origin": "http://127.0.0.1:8896", "Content-Type": "application/json"}), 200)
+        self.assertEqual(self.post_with({"Content-Type": "application/json"}), 200)
+
 
 if __name__ == "__main__":
     unittest.main()
