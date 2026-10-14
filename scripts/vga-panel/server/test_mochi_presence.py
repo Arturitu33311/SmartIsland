@@ -56,6 +56,7 @@ class HttpTest(unittest.TestCase):
         self.m = load()
         self.srv = ThreadingHTTPServer(("127.0.0.1", 0), self.m.Handler)
         self.port = self.srv.server_address[1]
+        self.m.PORT = self.port        # en producción el puerto configurado es el enlazado
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
 
     def tearDown(self):
@@ -97,6 +98,45 @@ class HttpTest(unittest.TestCase):
         out = self.get("/api/mochi/inbox?since_id=0")
         self.assertEqual(out["active_device"], "vga")
         self.assertEqual(len(out["messages"]), 1)
+
+
+class HostAndCorsTest(unittest.TestCase):
+    def setUp(self):
+        self.m = load()
+        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), self.m.Handler)
+        self.port = self.srv.server_address[1]
+        self.m.PORT = self.port
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        self.srv.shutdown()
+
+    def request(self, host, origin=None, path="/api/mochi/inbox?since_id=0"):
+        import http.client
+        c = http.client.HTTPConnection("127.0.0.1", self.port)
+        h = {"Host": host}
+        if origin:
+            h["Origin"] = origin
+        c.request("GET", path, headers=h)
+        r = c.getresponse()
+        return r.status, r.getheader("Access-Control-Allow-Origin")
+
+    def test_a_foreign_host_header_is_refused(self):
+        self.assertEqual(self.request("evil.example:%d" % self.port)[0], 421)
+        self.assertEqual(self.request("127.0.0.1.evil.example:%d" % self.port)[0], 421)
+
+    def test_loopback_and_tailnet_hosts_are_served(self):
+        self.assertEqual(self.request("127.0.0.1:%d" % self.port)[0], 200)
+        self.assertEqual(self.request("localhost:%d" % self.port)[0], 200)
+        self.assertEqual(self.request("%s:%d" % (self.m.BIND_TAILNET, self.port))[0], 200)
+
+    def test_cors_is_only_for_the_panels_own_origin(self):
+        _, allow = self.request("127.0.0.1:%d" % self.port, origin="http://127.0.0.1:8896")
+        self.assertEqual(allow, "http://127.0.0.1:8896")
+        _, allow = self.request("127.0.0.1:%d" % self.port, origin="https://evil.example")
+        self.assertIsNone(allow)
+        _, allow = self.request("127.0.0.1:%d" % self.port)          # clientes que no son navegador
+        self.assertIsNone(allow)
 
 
 if __name__ == "__main__":

@@ -148,6 +148,14 @@ def read_gateway():
         return {"activo": None, "error": str(ex)[:150]}
 
 
+def host_allowed(host_header, port):
+    """Solo el kiosco local: un `Host` que no sea este equipo es DNS rebinding (una página de otro origen que
+    resuelve su dominio a 127.0.0.1) y no se sirve."""
+    if not host_header:
+        return False
+    return host_header.strip().lower() in ("127.0.0.1:%d" % port, "localhost:%d" % port, "[::1]:%d" % port)
+
+
 def status_payload():
     return {
         "ts": int(time.time()),
@@ -179,6 +187,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self):
+        if not host_allowed(self.headers.get("Host"), PORT):
+            return self._send(421, {"error": "host no permitido"})
         if self.path in ("/", "/index.html"):
             try:
                 html = HTML_PATH.read_bytes()

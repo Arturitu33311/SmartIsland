@@ -76,6 +76,7 @@
 <script>/*@@ENGINE@@*/</script>
 <script>
 const $ = id => document.getElementById(id);
+const num = v => MochiLogic.num(v), trendKey = t => MochiLogic.trendKey(t);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
@@ -87,17 +88,17 @@ function renderClima(c){
     $("clima").innerHTML = `<span class="warn-txt">${esc(c.error || "sin datos de clima")}</span>`;
     return;
   }
-  let h = `<div class="temp">${c.temp_actual_c ?? "–"}°</div>`;
+  let h = `<div class="temp">${num(c.temp_actual_c)}°</div>`;
   h += `<div class="temp-desc">${esc(c.descripcion_actual || "")}</div>`;
   const rain = c.pico_prob_lluvia != null && c.pico_prob_lluvia >= 40;
   h += `<div class="metrow">
-    <div><span class="k">ALTA</span><span class="v">${c.max_c ?? "–"}°</span></div>
+    <div><span class="k">ALTA</span><span class="v">${num(c.max_c)}°</span></div>
     <div class="sep"></div>
-    <div><span class="k">BAJA</span><span class="v">${c.min_c ?? "–"}°</span></div>
+    <div><span class="k">BAJA</span><span class="v">${num(c.min_c)}°</span></div>
     <div class="sep"></div>
     <div><span class="k">LLUVIA</span><span class="v${rain ? " rain" : ""}">${
-      c.pico_prob_lluvia != null ? c.pico_prob_lluvia + "%" : "–"
-    }${rain && c.pico_hora_lluvia != null ? ` <small>~${c.pico_hora_lluvia}h</small>` : ""}</span></div>
+      c.pico_prob_lluvia != null ? num(c.pico_prob_lluvia) + "%" : "–"
+    }${rain && c.pico_hora_lluvia != null ? ` <small>~${num(c.pico_hora_lluvia)}h</small>` : ""}</span></div>
   </div>`;
   $("clima").innerHTML = h;
 }
@@ -113,7 +114,7 @@ function renderBio(e){
   $("bio").innerHTML = rows.map(([k,label]) => {
     const raw = e[k];
     const pct = raw == null ? null : clamp(Math.round(raw), 0, 100);
-    const tr = tend[k] || "flat";
+    const tr = trendKey(tend[k]);
     return `<div class="bar-row">
       <div class="bar-head">
         <span><span class="bar-name">${label}</span><span class="bar-trend ${tr}">${TREND[tr]}</span></span>
@@ -148,7 +149,7 @@ function renderTareas(t){
     let chip = "";
     if(a != null && a > 7) chip = `<span class="chip crit">CRITICAL</span>`;
     else if(a != null && a > 3) chip = `<span class="chip elev">ELEVADA</span>`;
-    const age = a != null ? `hace ${a} d` : "";
+    const age = a != null ? `hace ${num(a)} d` : "";
     return `<div class="task">
       <span class="task-txt">${esc(x.texto)}</span>
       <span class="task-meta">${chip}${esc(age)}${x.canal ? " · " + esc(x.canal) : ""}</span>
@@ -169,7 +170,7 @@ function renderSaldo(s){
   const rows = [
     ["CRÉDITOS EN CUENTA", s.cuenta, "saldo real", 2],
     ["LÍMITE DE JINX", s.jinx && s.jinx.restante,
-      s.jinx && s.jinx.limite != null ? "de $" + s.jinx.limite + " " + (per[s.jinx.reset] || "") : "", 0.5],
+      s.jinx && s.jinx.limite != null ? "de $" + num(s.jinx.limite) + " " + (per[s.jinx.reset] || "") : "", 0.5],
   ];
   let h = rows.map(([k, v, sub, err]) =>
     `<div class="fund-row"><span class="funds-k">${k}</span>` +
@@ -187,7 +188,7 @@ function renderSys(d){
   let h = `<span>SYS.UPTIME <b>${esc(up.texto || "?")}</b></span>`;
   h += `<span${w(sa.cuenta != null && sa.cuenta < 2)}>CUENTA <b>${m(sa.cuenta)}</b></span>`;
   h += `<span${w(jr != null && jr < 0.5)}>JINX <b>${m(jr)}</b></span>`;
-  h += `<span${w(di.libre_gb != null && di.libre_gb < 10)}>DISCO <b>${di.libre_gb != null ? di.libre_gb + "G" : "?"}</b></span>`;
+  h += `<span${w(di.libre_gb != null && di.libre_gb < 10)}>DISCO <b>${di.libre_gb != null ? num(di.libre_gb) + "G" : "?"}</b></span>`;
   h += `<span${w(gw.activo === false)}>GW <b>${gw.activo === true ? "OK" : esc(gw.estado || "?")}</b></span>`;
   $("sys").innerHTML = h;
 }

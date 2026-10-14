@@ -16,6 +16,14 @@
 
   const isNight = (hour) => hour >= 0 && hour < 6;
 
+  // Lo que manda la API nunca se interpola como marcado: los números se fuerzan y las clases van en lista blanca.
+  const num = (v) => {
+    if (v === null || v === undefined || v === "") return "–";
+    const n = Number(v);
+    return Number.isFinite(n) ? String(n) : "–";
+  };
+  const trendKey = (t) => (t === "up" || t === "down" || t === "flat" ? t : "flat");
+
   function emotionMood(e) {
     e = e || {};
     const vs = [e.affection, e.patience, e.trust].filter((v) => v != null);
@@ -139,6 +147,6 @@
     return pool[Math.floor(rnd() * pool.length)];
   }
 
-  return { deviceLabel, isMine, isNight, emotionMood, seasonal, pickOutfit, fitFor, stageFit, messageMood, decideMood,
+  return { deviceLabel, isMine, isNight, num, trendKey, emotionMood, seasonal, pickOutfit, fitFor, stageFit, messageMood, decideMood,
     nextGesture, gestureMs, gapMs, thoughtFor, easter };
 });

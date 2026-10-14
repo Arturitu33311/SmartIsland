@@ -111,6 +111,21 @@ test("the big stage gives outfits more room than the island does, but the tall p
   }
 });
 
+test("what the API sends is never trusted as markup: numbers are coerced, classes are whitelisted", () => {
+  assert.equal(L.num(20), "20");
+  assert.equal(L.num("21.5"), "21.5");
+  assert.equal(L.num("<img src=x onerror=alert(1)>"), "–");
+  assert.equal(L.num(null), "–");
+  assert.equal(L.num(undefined), "–");
+  assert.equal(L.num(NaN), "–");
+  assert.equal(L.num(Infinity), "–");
+  assert.equal(L.trendKey("up"), "up");
+  assert.equal(L.trendKey("down"), "down");
+  assert.equal(L.trendKey("flat"), "flat");
+  assert.equal(L.trendKey('x" onmouseover="alert(1)'), "flat");
+  assert.equal(L.trendKey(undefined), "flat");
+});
+
 test("night is between midnight and six", () => {
   assert.equal(L.isNight(0), true);
   assert.equal(L.isNight(5), true);

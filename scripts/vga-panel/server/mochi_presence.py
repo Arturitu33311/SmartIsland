@@ -34,6 +34,8 @@ PORT = int(os.environ.get("MOCHI_PORT", "8897"))
 HEARTBEAT_TIMEOUT = 45   # s sin latir -> el dispositivo se declara fuera
 IDLE_LIMIT = 300         # idle mayor -> no cuenta como "mirado"
 DEVICES = ("pc", "s21", "s22")  # el panel (vga) es el failsafe: siempre presente, no late
+# La página del panel (kiosco) es el único navegador que habla con este servidor desde un origen web.
+PANEL_ORIGINS = ("http://127.0.0.1:8896", "http://localhost:8896")
 INBOX_CAP = 50
 TEXT_CAP = 500
 MOODS = {"Idle", "Happy", "Sleepy", "Alert", "Listening", "Celebrating",
@@ -87,8 +89,27 @@ def active_device(now: float) -> str:
     return best
 
 
+def host_allowed(host_header, port):
+    """Loopback y la IP de la tailnet: cualquier otro `Host` es DNS rebinding."""
+    if not host_header:
+        return False
+    return host_header.strip().lower() in (
+        "127.0.0.1:%d" % port, "localhost:%d" % port, "[::1]:%d" % port,
+        "%s:%d" % (BIND_TAILNET.lower(), port))
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "MochiPresence/1.0"
+
+    def _cors_origin(self):
+        origin = self.headers.get("Origin", "")
+        return origin if origin in PANEL_ORIGINS else None
+
+    def _host_ok(self):
+        if host_allowed(self.headers.get("Host"), PORT):
+            return True
+        self._send(421, {"error": "host no permitido"})
+        return False
 
     def _send(self, code, body, ctype="application/json; charset=utf-8"):
         data = body if isinstance(body, bytes) else json.dumps(body, ensure_ascii=False).encode()
@@ -96,9 +117,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Mochi-Key")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        allow = self._cors_origin()
+        if allow:
+            self.send_header("Access-Control-Allow-Origin", allow)
+            self.send_header("Vary", "Origin")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Mochi-Key")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.end_headers()
         self.wfile.write(data)
 
@@ -124,6 +148,8 @@ class Handler(BaseHTTPRequestHandler):
             return None
 
     def do_GET(self):
+        if not self._host_ok():
+            return
         if self.path == "/health":
             return self._send(200, {"ok": True})
         if not self._authed():
@@ -160,14 +186,21 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, {"error": "not found"})
 
     def do_OPTIONS(self):
+        if not self._host_ok():
+            return
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Mochi-Key")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        allow = self._cors_origin()
+        if allow:
+            self.send_header("Access-Control-Allow-Origin", allow)
+            self.send_header("Vary", "Origin")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Mochi-Key")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Content-Length", "0")
         self.end_headers()
 
     def do_POST(self):
+        if not self._host_ok():
+            return
         if not self._authed():
             return self._send(403, {"error": "forbidden"})
         now = time.time()
